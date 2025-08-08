@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#7c4dff" />
+  <title>Vasudev</title>
+  <style>
+    :root{
+      color-scheme: dark;
+      --bg1:#0b0f1a; --bg2:#1a1f3a; --text:#e6edf3; --muted:#9da7b1;
+      --accent:#7c4dff; --accent2:#22d3ee; --border:#232a36;
+    }
+    html,body{height:100vh;margin:0;overflow:hidden;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--text);font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{height:100%;display:flex;align-items:center;justify-content:center;padding:40px 16px}
+    .box{max-width:720px;width:100%;text-align:center}
+    h1{font-size:56px;letter-spacing:0.6px;margin:0 0 14px}
+    p.sub{margin:0 0 28px;color:var(--muted)}
+    .search{display:flex;align-items:center;gap:10px;background:rgba(10,12,18,.6);backdrop-filter:saturate(140%) blur(6px);border:1px solid var(--border);padding:10px 12px;border-radius:14px}
+    .search input{flex:1;background:transparent;border:none;outline:0;color:var(--text);font-size:16px}
+    .icon{width:18px;height:18px;opacity:.85}
+    .quick{display:flex;gap:10px;justify-content:center;margin-top:16px}
+    .chip{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#121522;color:var(--text);font-size:12px;text-decoration:none}
+    .brand{display:inline-flex;align-items:center;gap:8px;}
+    .brand svg{width:22px;height:22px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="box">
+      <div class="brand" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l2.5 4.5L20 8l-3.5 3L17 17l-5-2-5 2 1.5-6L5 8l5.5-1.5L12 2z" fill="url(#g)"/><defs><linearGradient id="g" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#7c4dff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs></svg>
+        <h1>Vasudev</h1>
+      </div>
+      <p class="sub">Your AI‑powered web companion.<br/>Type, speak or show.</p>
+      <form class="search" action="https://www.google.com/search" method="GET">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 4a7 7 0 015.292 11.708l3 3a1 1 0 01-1.414 1.414l-3-3A7 7 0 1111 4zm0 2a5 5 0 100 10 5 5 0 000-10z" fill="#9da7b1"/></svg>
+        <input type="text" name="q" placeholder="Type to browse, ask Vasudev" autofocus />
+        <svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3a3 3 0 013 3v5a3 3 0 11-6 0V6a3 3 0 013-3zm-5 9a5 5 0 0010 0h2a7 7 0 01-6 6.92V21h-2v-2.08A7 7 0 015 12h2z" fill="#9da7b1"/></svg>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 7a3 3 0 013-3h2l1 2h4l1-2h2a3 3 0 013 3v10a3 3 0 01-3 3H7a3 3 0 01-3-3V7z" stroke="#9da7b1"/><circle cx="12" cy="13" r="3.5" stroke="#9da7b1"/></svg>
+      </form>
+      <div class="quick">
+        <a class="chip" href="https://youtube.com">YouTube</a>
+        <a class="chip" href="https://github.com">GitHub</a>
+        <a class="chip" href="https://news.ycombinator.com">Hacker News</a>
+        <a class="chip" href="https://gmail.com">Gmail</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
