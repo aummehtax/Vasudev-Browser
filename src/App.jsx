@@ -28,6 +28,11 @@ function sanitizeUrlDisplay(input) {
     if (url.hostname.includes('google.') && url.hash) {
       if (/^#(vhid|imgrc|lrd|tt|spf)/i.test(url.hash)) url.hash = '';
     }
+    return url.toString();
+  } catch {
+    return input || '';
+  }
+}
 
 // Sanitize URL for navigation: same as display, but never blank out and always return a valid string
 function sanitizeUrlForNav(input) {
@@ -51,11 +56,6 @@ function sanitizeUrlForNav(input) {
     return url.toString();
   } catch {
     return input;
-  }
-}
-    return url.toString();
-  } catch {
-    return input || '';
   }
 }
 

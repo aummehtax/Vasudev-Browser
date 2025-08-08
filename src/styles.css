@@ -95,6 +95,7 @@ html, body, #root {
   border: 1px solid #1a1e24;
   border-radius: 12px;
   padding: 6px 10px;
+  position: relative; /* for suggestions dropdown */
 }
 .addressbar .lock { opacity: 0.7; }
 .addressbar input {
@@ -106,6 +107,33 @@ html, body, #root {
   font-size: 14px;
 }
 .addressbar:focus-within { border-color: #273041; box-shadow: inset 0 0 0 1px #273041; }
+
+/* Omnibox suggestions */
+.omnibox-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  background: #0f1216;
+  border: 1px solid #20252c;
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+  overflow: hidden;
+  z-index: 1500;
+}
+.omnibox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.omnibox-item:hover,
+.omnibox-item.active { background: #12161c; }
+.omnibox-icon { opacity: .75; color: #9da7b1; display: inline-flex; }
+.omnibox-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .webview-wrapper {
   flex: 1;
@@ -230,7 +258,7 @@ webview {
 .downloads-panel {
   position: absolute;
   right: 12px;
-  top: 58px; /* below titlebar */
+  top: -2px; /* closer to titlebar */
   width: 380px;
   max-height: 60vh;
   background: #0f1216;

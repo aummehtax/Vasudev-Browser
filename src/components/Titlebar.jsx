@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export default function Titlebar({
   address,
@@ -15,9 +15,77 @@ export default function Titlebar({
   canGoForward,
   themeColor
 }) {
+  // Suggestions state
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  // Heuristic: treat input as URL => do not show suggestions
+  const isProbablyUrl = useCallback((q) => {
+    if (!q) return false;
+    const s = q.trim();
+    if (/\s/.test(s)) return false; // spaces => likely a query
+    if (/^(https?:\/\/|file:|chrome:)/i.test(s)) return true;
+    if (/^[\w-]+:\/\//.test(s)) return true; // any scheme
+    const domainLike = /^(localhost|[\w-]+(?:\.[\w-]+)+)(?::\d+)?(?:[\/?#].*)?$/i;
+    return domainLike.test(s);
+  }, []);
+
+  // Fetch suggestions (debounced) via preload (avoids CORS)
+  useEffect(() => {
+    const q = (address || '').trim();
+    if (!q || isProbablyUrl(q)) { setSuggestions([]); setOpen(false); setActiveIdx(-1); return; }
+    const id = setTimeout(async () => {
+      try {
+        const items = await window.api?.getSuggestions?.(q);
+        setSuggestions(items);
+        setOpen(items.length > 0);
+        setActiveIdx(-1);
+      } catch {
+        setSuggestions([]);
+        setOpen(false);
+        setActiveIdx(-1);
+      }
+    }, 120);
+    return () => clearTimeout(id);
+  }, [address, isProbablyUrl]);
+
+  const commit = useCallback((text) => {
+    if (typeof onAddressChange === 'function') onAddressChange(text);
+    // Defer submit so state updates before navigate uses latest value
+    if (typeof onAddressSubmit === 'function') setTimeout(() => onAddressSubmit(), 0);
+    setOpen(false);
+    setActiveIdx(-1);
+  }, [onAddressChange, onAddressSubmit]);
+
   const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Enter') onAddressSubmit();
-  }, [onAddressSubmit]);
+    if (!open) {
+      if (e.key === 'Enter') onAddressSubmit();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIdx(i => Math.min((i < 0 ? -1 : i) + 1, suggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIdx(i => Math.max((i < 0 ? suggestions.length : i) - 1, -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const chosen = activeIdx >= 0 ? suggestions[activeIdx] : address;
+      commit(chosen);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      setActiveIdx(-1);
+    }
+  }, [open, suggestions, activeIdx, address, commit, onAddressSubmit]);
+
+  const handleBlur = useCallback((e) => {
+    // Close if clicking outside the list
+    setTimeout(() => setOpen(false), 100);
+  }, []);
 
   const style = themeColor ? {
     background: `linear-gradient(180deg, ${hexToRgba(themeColor, 0.22)}, ${hexToRgba(themeColor, 0.12)})`
@@ -52,12 +120,35 @@ export default function Titlebar({
           </svg>
         </span>
         <input
+          ref={inputRef}
           value={address}
           onChange={(e) => onAddressChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onFocus={() => { if (suggestions.length && !isProbablyUrl(address)) setOpen(true); }}
+          onBlur={handleBlur}
           spellCheck={false}
           placeholder="Search or enter address"
         />
+        {open && suggestions.length > 0 && (
+          <div className="omnibox-suggestions" role="listbox" ref={listRef}>
+            {suggestions.map((s, idx) => (
+              <div
+                key={`${s}-${idx}`}
+                role="option"
+                aria-selected={idx === activeIdx}
+                className={`omnibox-item ${idx === activeIdx ? 'active' : ''}`}
+                onMouseDown={(e) => { e.preventDefault(); commit(s); }}
+                onMouseEnter={() => setActiveIdx(idx)}
+                title={s}
+              >
+                <span className="omnibox-icon" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 4a7 7 0 015.292 11.708l3 3a1 1 0 01-1.414 1.414l-3-3A7 7 0 1111 4zm0 2a5 5 0 100 10 5 5 0 000-10z" fill="currentColor"/></svg>
+                </span>
+                <span className="omnibox-text">{s}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="actions">

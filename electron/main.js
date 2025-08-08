@@ -112,6 +112,21 @@ function createWindow() {
     if (!win || !url) return;
     try { win.webContents.downloadURL(url); } catch {}
   });
+  // Suggestions fetch (avoid renderer CORS)
+  ipcMain.handle('get-suggestions', async (_event, query) => {
+    try {
+      if (!query || typeof query !== 'string') return [];
+      const u = new URL('https://suggestqueries.google.com/complete/search');
+      u.searchParams.set('client', 'firefox');
+      u.searchParams.set('q', query);
+      const res = await fetch(u.toString());
+      const data = await res.json();
+      const items = Array.isArray(data) && Array.isArray(data[1]) ? data[1] : [];
+      return items.slice(0, 8);
+    } catch {
+      return [];
+    }
+  });
 session.defaultSession.on('will-download', (event, item, webContents) => {
   const win = BrowserWindow.fromWebContents(webContents);
   if (!win) return;

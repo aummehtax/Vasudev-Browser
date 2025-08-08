@@ -39,7 +39,6 @@ export default function TabBar({ tabs, activeTabId, onSelect, onClose, onNewTab,
               )}
               <div className="preview-meta">
                 <div className="p-title">{t.title || 'New Tab'}</div>
-                <div className="p-url">{(t.url || '').replace(/^https?:\/\//,'')}</div>
               </div>
             </div>
           </button>
