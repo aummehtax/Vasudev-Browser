@@ -1,0 +1,17 @@
+{
+  "name": "vasudev-browser",
+  "version": "1.0.0",
+  "description": "A modern AI-powered browser built with Electron",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "build": "electron-builder"
+  },
+  "keywords": ["browser", "electron", "ai", "vasudev"],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0"
+  }
+}

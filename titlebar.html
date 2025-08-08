@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vasudev Browser Title Bar</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'Space Grotesk', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: white;
+            overflow: hidden;
+            user-select: none;
+        }
+        
+        .drag-region {
+            -webkit-app-region: drag;
+        }
+        
+        .no-drag {
+            -webkit-app-region: no-drag;
+        }
+        
+        /* macOS Style Title Bar */
+        .title-bar {
+            height: 48px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #242446 100%);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid #374151;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* macOS Window Controls (Left Side) */
+        .window-controls {
+            display: flex;
+            gap: 8px;
+            -webkit-app-region: no-drag;
+            z-index: 10;
+        }
+        
+        .window-control {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            position: relative;
+            border: 0.5px solid rgba(0,0,0,0.2);
+        }
+        
+        /* macOS Traffic Light Colors */
+        .close { 
+            background: linear-gradient(135deg, #ff5f57 0%, #ff4136 100%);
+        }
+        .close:hover { 
+            background: linear-gradient(135deg, #ff4136 0%, #e60000 100%);
+            transform: scale(1.1);
+        }
+        
+        .minimize { 
+            background: linear-gradient(135deg, #ffbd2e 0%, #ffaa00 100%);
+        }
+        .minimize:hover { 
+            background: linear-gradient(135deg, #ffaa00 0%, #ff9500 100%);
+            transform: scale(1.1);
+        }
+        
+        .maximize { 
+            background: linear-gradient(135deg, #28ca42 0%, #20a832 100%);
+        }
+        .maximize:hover { 
+            background: linear-gradient(135deg, #20a832 0%, #15791f 100%);
+            transform: scale(1.1);
+        }
+        
+        /* macOS Button Icons (Show on hover) */
+        .window-control i {
+            font-size: 6px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            color: rgba(0, 0, 0, 0.7);
+            font-weight: 600;
+        }
+        
+        .window-control:hover i {
+            opacity: 1;
+        }
+        
+        /* Center Section - Navigation + Search */
+        .title-center {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            -webkit-app-region: no-drag;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        /* Navigation Controls in Center */
+        .nav-controls {
+            display: flex;
+            gap: 4px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            padding: 2px;
+        }
+        
+        .nav-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 12px;
+        }
+        
+        .nav-btn:hover:not(:disabled) {
+            background: rgba(255,255,255,0.1);
+            color: #00D4FF;
+            transform: scale(1.05);
+        }
+        
+        .nav-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        .nav-btn:active {
+            transform: scale(0.95);
+        }
+        
+        /* Premium Search Bar in Center */
+        .search-container {
+            display: flex;
+            width: 380px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            margin-left: 12px;
+        }
+        
+        .search-container:focus-within {
+            border-color: #00D4FF;
+            box-shadow: 0 0 0 1px #00D4FF, 0 0 12px rgba(0,212,255,0.3);
+            background: rgba(255,255,255,0.08);
+        }
+        
+        .security-icon {
+            padding: 0 8px;
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            transition: color 0.2s ease;
+        }
+        
+        .search-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: #E0E0E0;
+            padding: 6px 8px;
+            font-size: 13px;
+            outline: none;
+            font-family: inherit;
+        }
+        
+        .search-input::placeholder {
+            color: rgba(224,224,224,0.5);
+        }
+        
+        .search-input::selection {
+            background: #00D4FF;
+            color: white;
+        }
+        
+        .search-actions {
+            display: flex;
+            align-items: center;
+            padding-right: 4px;
+        }
+        
+        .search-btn {
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 11px;
+            margin: 0 2px;
+        }
+        
+        .search-btn:hover {
+            color: #00D4FF;
+            background: rgba(0,212,255,0.1);
+        }
+        
+        /* Right Section - Empty for macOS Style */
+        .title-right {
+            width: 80px; /* Same width as left for balance */
+            display: flex;
+            justify-content: flex-end;
+            -webkit-app-region: no-drag;
+        }
+        
+        .more-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 12px;
+        }
+        
+        .more-btn:hover {
+            background: rgba(255,255,255,0.1);
+            color: #00D4FF;
+        }
+        
+        /* Hidden compatibility elements */
+        .address-container {
+            display: none;
+        }
+        
+        .right-controls {
+            display: none;
+        }
+        
+        /* Suggestions Dropdown */
+        .suggestions {
+            position: absolute;
+            top: calc(100% + 2px);
+            left: 0;
+            right: 0;
+            background: #374151;
+            border: 1px solid #4b5563;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        
+        .suggestions.show {
+            display: block;
+            animation: slideDown 0.2s ease;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .suggestion-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background-color 0.2s ease;
+            font-size: 14px;
+        }
+        
+        .suggestion-item:hover,
+        .suggestion-item.selected {
+            background: #4b5563;
+        }
+        
+        .suggestion-item:first-child {
+            border-radius: 8px 8px 0 0;
+        }
+        
+        .suggestion-item:last-child {
+            border-radius: 0 0 8px 8px;
+        }
+        
+        .suggestion-icon {
+            width: 16px;
+            text-align: center;
+            color: #9ca3af;
+        }
+        
+        /* Tab Bar */
+        .tab-bar {
+            height: 40px;
+            background: #111827;
+            border-bottom: 1px solid #374151;
+            display: flex;
+            align-items: center;
+        }
+        
+        .tabs-container {
+            flex: 1;
+            display: flex;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        
+        .tabs-container::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .tab {
+            min-width: 180px;
+            max-width: 240px;
+            height: 36px;
+            background: #1f2937;
+            border-right: 1px solid #374151;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+        
+        .tab:hover {
+            background: #374151;
+        }
+        
+        .tab.active {
+            background: #1a1a2e;
+        }
+        
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #00f0ff, #b400ff);
+        }
+        
+        .tab-icon {
+            margin-right: 8px;
+            font-size: 12px;
+            color: #9ca3af;
+            transition: color 0.2s ease;
+        }
+        
+        .tab.active .tab-icon {
+            color: #00f0ff;
+        }
+        
+        .tab-title {
+            flex: 1;
+            font-size: 13px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            color: #e5e7eb;
+        }
+        
+        .tab.active .tab-title {
+            color: white;
+        }
+        
+        .tab-close {
+            width: 16px;
+            height: 16px;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-left: 8px;
+            transition: all 0.2s ease;
+            font-size: 10px;
+        }
+        
+        .tab-close:hover {
+            background: #4b5563;
+            color: white;
+        }
+        
+        .new-tab-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 14px;
+        }
+        
+        .new-tab-btn:hover {
+            background: #374151;
+            color: white;
+        }
+        
+        /* Loading animation */
+        .loading {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Enhanced Tooltip */
+        .tooltip {
+            position: relative;
+        }
+        
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: -28px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            z-index: 1000;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .tooltip:hover::after {
+            opacity: 1;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 900px) {
+            .search-container {
+                width: 320px;
+            }
+            
+            .title-center {
+                gap: 8px;
+            }
+        }
+        
+        @media (max-width: 700px) {
+            .search-container {
+                width: 280px;
+            }
+            
+            .nav-btn {
+                width: 26px;
+                height: 26px;
+            }
+        }
+        
+        /* Homepage Styles */
+        .search-container.homepage {
+            border-color: #00D4FF;
+            box-shadow: 0 0 0 1px rgba(0,212,255,0.3);
+        }
+        
+        .search-input.homepage::placeholder {
+            color: #00D4FF;
+            opacity: 0.8;
+        }
+        
+        .security-icon.homepage {
+            color: #00D4FF;
+            animation: pulse-home 2s infinite;
+        }
+        
+        @keyframes pulse-home {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+        
+        .tab.homepage .tab-icon {
+            color: #00f0ff;
+            animation: pulse-home 2s infinite;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- macOS Style Title Bar -->
+    <div class="title-bar drag-region">
+        <!-- Left Section - macOS Traffic Light Controls -->
+        <div class="window-controls">
+            <div class="window-control close tooltip" id="closeBtn" data-tooltip="Close">
+                <i class="fas fa-times"></i>
+            </div>
+            <div class="window-control minimize tooltip" id="minimizeBtn" data-tooltip="Minimize">
+                <i class="fas fa-minus"></i>
+            </div>
+            <div class="window-control maximize tooltip" id="maximizeBtn" data-tooltip="Maximize">
+                <i class="fas fa-expand"></i>
+            </div>
+        </div>
+        
+        <!-- Center Section - Navigation + Search -->
+        <div class="title-center">
+            <!-- Navigation Controls -->
+            <div class="nav-controls">
+                <button class="nav-btn tooltip" id="backBtn" disabled data-tooltip="Go Back">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <button class="nav-btn tooltip" id="forwardBtn" disabled data-tooltip="Go Forward">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+                <button class="nav-btn tooltip" id="refreshBtn" data-tooltip="Refresh Page">
+                    <i class="fas fa-redo"></i>
+                </button>
+                <button class="nav-btn tooltip" id="homeBtn" data-tooltip="Home">
+                    <i class="fas fa-home"></i>
+                </button>
+            </div>
+            
+            <!-- Search Bar -->
+            <div class="search-container">
+                <i class="security-icon fas fa-home" id="securityIcon" style="color: #00D4FF;" title="Homepage"></i>
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="searchInput"
+                    placeholder="Search or enter website URL..."
+                    spellcheck="false"
+                    autocomplete="off"
+                >
+                <div class="search-actions">
+                    <button class="search-btn tooltip" id="bookmarkBtn" data-tooltip="Bookmark">
+                        <i class="far fa-star"></i>
+                    </button>
+                    <button class="search-btn tooltip" id="voiceBtn" data-tooltip="Voice Search">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="suggestions" id="suggestions"></div>
+        </div>
+        
+        <!-- Right Section - More Button -->
+        <div class="title-right">
+            <button class="more-btn tooltip" id="moreBtn" data-tooltip="More Options">
+                <i class="fas fa-ellipsis-v"></i>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Hidden compatibility elements -->
+    <div class="address-container no-drag" style="display: none;">
+        <div class="address-bar">
+            <i class="security-icon fas fa-home" style="color: #f59e0b;" title="Local page"></i>
+            <input 
+                type="text" 
+                class="address-input" 
+                id="addressInput"
+                placeholder="Search or enter website URL..."
+                spellcheck="false"
+                autocomplete="off"
+            >
+            <div class="address-actions">
+                <button class="address-btn tooltip" data-tooltip="Bookmark">
+                    <i class="far fa-star"></i>
+                </button>
+                <button class="address-btn tooltip" data-tooltip="Voice Search">
+                    <i class="fas fa-microphone"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="right-controls no-drag" style="display: none;">
+        <button class="nav-btn tooltip" id="extensionsBtn" data-tooltip="Extensions">
+            <i class="fas fa-puzzle-piece"></i>
+        </button>
+        <button class="nav-btn tooltip" id="downloadsBtn" data-tooltip="Downloads">
+            <i class="fas fa-download"></i>
+        </button>
+        <button class="nav-btn tooltip" id="aiBtn" data-tooltip="AI Assistant">
+            <i class="fas fa-robot"></i>
+        </button>
+        <button class="nav-btn tooltip" id="menuBtn" data-tooltip="Menu">
+            <i class="fas fa-ellipsis-v"></i>
+        </button>
+    </div>
+    
+    <!-- Tab Bar -->
+    <div class="tab-bar drag-region">
+        <div class="tabs-container no-drag" id="tabsContainer">
+            <div class="tab active" id="tab-1">
+                <i class="tab-icon fas fa-home"></i>
+                <span class="tab-title">New Tab</span>
+                <button class="tab-close" onclick="event.stopPropagation();">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <button class="new-tab-btn no-drag tooltip" id="newTabBtn" data-tooltip="New Tab">
+            <i class="fas fa-plus"></i>
+        </button>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // Global variables
+        let isLoading = false;
+        let currentURL = '';
+        let selectedSuggestion = -1;
+        let tabs = [];
+        let activeTabId = 1;
+        
+        // DOM elements
+        let searchInput, addressInput, suggestions, securityIcon, refreshBtn, backBtn, forwardBtn, tabTitle;
+        
+        // Initialize when DOM loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeElements();
+            setupEventListeners();
+            injectHomepageStyles();
+            console.log('✅ macOS style title bar initialized');
+        });
+        
+        // Initialize DOM elements
+        function initializeElements() {
+            searchInput = document.getElementById('searchInput');
+            addressInput = document.getElementById('addressInput');
+            suggestions = document.getElementById('suggestions');
+            securityIcon = document.getElementById('securityIcon');
+            refreshBtn = document.getElementById('refreshBtn');
+            backBtn = document.getElementById('backBtn');
+            forwardBtn = document.getElementById('forwardBtn');
+            tabTitle = document.querySelector('.tab-title');
+        }
+        
+        // Setup all event listeners
+        function setupEventListeners() {
+            // macOS Window Controls
+            document.getElementById('closeBtn').addEventListener('click', () => {
+                ipcRenderer.send('window-close');
+            });
+            
+            document.getElementById('minimizeBtn').addEventListener('click', () => {
+                ipcRenderer.send('window-minimize');
+            });
+            
+            document.getElementById('maximizeBtn').addEventListener('click', () => {
+                ipcRenderer.send('window-maximize');
+            });
+            
+            // Navigation Controls
+            backBtn.addEventListener('click', () => {
+                ipcRenderer.send('navigate-back');
+            });
+            
+            forwardBtn.addEventListener('click', () => {
+                ipcRenderer.send('navigate-forward');
+            });
+            
+            refreshBtn.addEventListener('click', () => {
+                if (isLoading) {
+                    ipcRenderer.send('navigate-stop');
+                } else {
+                    ipcRenderer.send('navigate-refresh');
+                }
+            });
+            
+            document.getElementById('homeBtn').addEventListener('click', () => {
+                ipcRenderer.send('navigate-home');
+            });
+            
+            // Search Bar Events
+            searchInput.addEventListener('input', handleSearchInput);
+            searchInput.addEventListener('keydown', handleSearchKeydown);
+            searchInput.addEventListener('focus', handleSearchFocus);
+            searchInput.addEventListener('blur', handleSearchBlur);
+            
+            // Tab Management
+            document.getElementById('newTabBtn').addEventListener('click', () => {
+                ipcRenderer.send('new-tab');
+            });
+            
+            // Search Actions
+            document.getElementById('bookmarkBtn').addEventListener('click', handleBookmark);
+            document.getElementById('voiceBtn').addEventListener('click', handleVoiceSearch);
+            
+            // More Button
+            document.getElementById('moreBtn').addEventListener('click', handleMoreOptions);
+            
+            // Global keyboard shortcuts
+            document.addEventListener('keydown', handleGlobalKeyboard);
+        }
+        
+        // Search input handler
+        function handleSearchInput(e) {
+            const query = e.target.value.trim();
+            if (query.length > 0) {
+                showSuggestions(query);
+            } else {
+                hideSuggestions();
+            }
+        }
+        
+        // Search keydown handler
+        function handleSearchKeydown(e) {
+            const suggestionItems = suggestions.querySelectorAll('.suggestion-item');
+            
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                let query = e.target.value.trim();
+                
+                if (!query && isHomepageOrDefault(currentURL)) {
+                    return;
+                }
+                
+                if (selectedSuggestion >= 0 && suggestionItems[selectedSuggestion]) {
+                    const selectedText = suggestionItems[selectedSuggestion].querySelector('span').textContent;
+                    navigateToURL(selectedText);
+                } else if (query) {
+                    navigateToURL(query);
+                }
+                hideSuggestions();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedSuggestion = Math.min(selectedSuggestion + 1, suggestionItems.length - 1);
+                updateSuggestionSelection();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedSuggestion = Math.max(selectedSuggestion - 1, -1);
+                updateSuggestionSelection();
+            } else if (e.key === 'Escape') {
+                hideSuggestions();
+                searchInput.blur();
+            }
+        }
+        
+        // Search focus handler
+        function handleSearchFocus() {
+            if (!currentURL || isHomepageOrDefault(currentURL)) {
+                searchInput.focus();
+            } else {
+                searchInput.select();
+            }
+            
+            if (searchInput.value.trim()) {
+                showSuggestions(searchInput.value.trim());
+            }
+        }
+        
+        // Search blur handler
+        function handleSearchBlur() {
+            setTimeout(() => hideSuggestions(), 150);
+        }
+        
+        // Navigate to URL
+        function navigateToURL(url) {
+            if (url) {
+                ipcRenderer.send('navigate-to', url);
+            }
+        }
+        
+        // Show search suggestions
+        function showSuggestions(query) {
+            const suggestionList = [
+                { icon: 'fas fa-search', text: `Search for "${query}"` },
+                { icon: 'fas fa-globe', text: `${query}.com` },
+                { icon: 'fas fa-globe', text: `${query}.org` },
+                { icon: 'fas fa-globe', text: `www.${query}.com` },
+                { icon: 'fas fa-history', text: `Recent: ${query}` }
+            ];
+            
+            suggestions.innerHTML = suggestionList.map((item, index) => `
+                <div class="suggestion-item" onclick="selectSuggestion('${item.text}')">
+                    <i class="suggestion-icon ${item.icon}"></i>
+                    <span>${item.text}</span>
+                </div>
+            `).join('');
+            
+            suggestions.classList.add('show');
+            selectedSuggestion = -1;
+        }
+        
+        // Hide suggestions
+        function hideSuggestions() {
+            suggestions.classList.remove('show');
+            selectedSuggestion = -1;
+        }
+        
+        // Select suggestion
+        function selectSuggestion(text) {
+            searchInput.value = text;
+            navigateToURL(text);
+            hideSuggestions();
+        }
+        
+        // Update suggestion selection
+        function updateSuggestionSelection() {
+            const items = suggestions.querySelectorAll('.suggestion-item');
+            items.forEach((item, index) => {
+                item.classList.toggle('selected', index === selectedSuggestion);
+            });
+            
+            if (selectedSuggestion >= 0 && items[selectedSuggestion]) {
+                const selectedText = items[selectedSuggestion].querySelector('span').textContent;
+                searchInput.value = selectedText;
+            }
+        }
+        
+        // Function to detect homepage/default pages
+        function isHomepageOrDefault(url) {
+            if (!url) return true;
+            
+            const homepagePatterns = [
+                'homepage.html',
+                'file:///',
+                'vasudev-browser',
+                'localhost',
+                'about:blank',
+                'chrome://',
+                'electron://'
+            ];
+            
+            return homepagePatterns.some(pattern => url.includes(pattern)) || 
+                   url.endsWith('.html') || 
+                   (url.startsWith('file://') && url.includes('homepage'));
+        }
+        
+        // Update search bar
+        function updateSearchBar(url) {
+            currentURL = url;
+            
+            if (isHomepageOrDefault(url)) {
+                searchInput.value = '';
+                searchInput.placeholder = 'Search or enter website URL...';
+                searchInput.classList.add('homepage');
+                document.querySelector('.search-container').classList.add('homepage');
+            } else {
+                searchInput.value = url;
+                searchInput.placeholder = 'Search or enter website URL...';
+                searchInput.classList.remove('homepage');
+                document.querySelector('.search-container').classList.remove('homepage');
+            }
+        }
+        
+        // Update security icon
+        function updateSecurityIcon(url) {
+            if (isHomepageOrDefault(url)) {
+                securityIcon.className = 'security-icon fas fa-home homepage';
+                securityIcon.style.color = '#00D4FF';
+                securityIcon.title = 'Homepage';
+            } else if (url.startsWith('https://')) {
+                securityIcon.className = 'security-icon fas fa-lock';
+                securityIcon.style.color = '#10b981';
+                securityIcon.title = 'Secure connection (HTTPS)';
+            } else if (url.startsWith('http://')) {
+                securityIcon.className = 'security-icon fas fa-unlock';
+                securityIcon.style.color = '#ef4444';
+                securityIcon.title = 'Not secure (HTTP)';
+            } else if (url.startsWith('file://')) {
+                securityIcon.className = 'security-icon fas fa-file';
+                securityIcon.style.color = '#f59e0b';
+                securityIcon.title = 'Local file';
+            } else {
+                securityIcon.className = 'security-icon fas fa-globe';
+                securityIcon.style.color = '#f59e0b';
+                securityIcon.title = 'Local or special page';
+            }
+        }
+        
+        // Update tab title
+        function updateTabTitle(title) {
+            if (tabTitle) {
+                if (isHomepageOrDefault(currentURL)) {
+                    tabTitle.textContent = 'New Tab';
+                } else {
+                    tabTitle.textContent = title || 'Loading...';
+                }
+                tabTitle.title = tabTitle.textContent;
+            }
+        }
+        
+        // Handle bookmark button
+        function handleBookmark() {
+            const bookmarkIcon = document.querySelector('#bookmarkBtn i');
+            if (bookmarkIcon.classList.contains('far')) {
+                bookmarkIcon.className = 'fas fa-star';
+                bookmarkIcon.style.color = '#fbbf24';
+                console.log('Bookmarked:', currentURL);
+            } else {
+                bookmarkIcon.className = 'far fa-star';
+                bookmarkIcon.style.color = '#9ca3af';
+                console.log('Removed bookmark:', currentURL);
+            }
+        }
+        
+        // Handle voice search
+        function handleVoiceSearch() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                recognition.start();
+                
+                recognition.onresult = function(event) {
+                    const result = event.results[0][0].transcript;
+                    searchInput.value = result;
+                    navigateToURL(result);
+                };
+                
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                };
+            } else {
+                console.log('Speech recognition not supported');
+            }
+        }
+        
+        // Handle more options
+        function handleMoreOptions() {
+            console.log('More options clicked');
+            ipcRenderer.send('toggle-ai-panel');
+        }
+        
+        // Get tab icon
+        function getTabIcon(url) {
+            if (!url || isHomepageOrDefault(url)) return 'fas fa-home';
+            if (url.includes('google.com')) return 'fab fa-google';
+            if (url.includes('youtube.com')) return 'fab fa-youtube';
+            if (url.includes('github.com')) return 'fab fa-github';
+            if (url.includes('facebook.com')) return 'fab fa-facebook';
+            if (url.includes('twitter.com')) return 'fab fa-twitter';
+            if (url.includes('instagram.com')) return 'fab fa-instagram';
+            if (url.includes('linkedin.com')) return 'fab fa-linkedin';
+            if (url.startsWith('https://')) return 'fas fa-lock';
+            if (url.startsWith('http://')) return 'fas fa-globe';
+            return 'fas fa-file';
+        }
+        
+        // Render tabs
+        function renderTabs() {
+            const tabsContainer = document.getElementById('tabsContainer');
+            if (!tabsContainer) return;
+
+            tabsContainer.innerHTML = tabs.map(tab => {
+                let displayTitle = tab.title || 'Loading...';
+                let tabIcon = getTabIcon(tab.url);
+                
+                if (isHomepageOrDefault(tab.url)) {
+                    displayTitle = 'New Tab';
+                    tabIcon = 'fas fa-home';
+                }
+                
+                return `
+                    <div class="tab ${tab.active ? 'active' : ''}" onclick="switchTab(${tab.id})">
+                        <i class="tab-icon ${tabIcon}"></i>
+                        <span class="tab-title" title="${displayTitle}">${displayTitle}</span>
+                        <button class="tab-close" onclick="event.stopPropagation(); closeTab(${tab.id})">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Switch tab
+        function switchTab(tabId) {
+            ipcRenderer.send('switch-tab', tabId);
+        }
+        
+        // Close tab
+        function closeTab(tabId) {
+            ipcRenderer.send('close-tab', tabId);
+        }
+        
+        // Global keyboard shortcuts
+        function handleGlobalKeyboard(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+                e.preventDefault();
+                searchInput.focus();
+                if (!isHomepageOrDefault(currentURL)) {
+                    searchInput.select();
+                }
+            }
+            
+            if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+                e.preventDefault();
+                if (!isLoading) {
+                    ipcRenderer.send('navigate-refresh');
+                }
+            }
+            
+            if ((e.ctrlKey || e.metaKey) && e.key === 't') {
+                e.preventDefault();
+                ipcRenderer.send('new-tab');
+            }
+            
+            if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+                e.preventDefault();
+                ipcRenderer.send('close-tab', activeTabId);
+            }
+            
+            if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+                e.preventDefault();
+                const tabIndex = parseInt(e.key) - 1;
+                if (tabs[tabIndex]) {
+                    switchTab(tabs[tabIndex].id);
+                }
+            }
+        }
+        
+        // Inject homepage styles
+        function injectHomepageStyles() {
+            const homepageStyles = `
+                .search-container.homepage {
+                    border-color: #00D4FF;
+                    box-shadow: 0 0 0 1px rgba(0,212,255,0.3);
+                }
+                
+                .search-input.homepage::placeholder {
+                    color: #00D4FF;
+                    opacity: 0.8;
+                }
+                
+                .security-icon.homepage {
+                    animation: pulse-home 2s infinite;
+                }
+                
+                @keyframes pulse-home {
+                    0% { opacity: 0.7; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.7; }
+                }
+                
+                .tab.homepage .tab-icon {
+                    color: #00f0ff;
+                    animation: pulse-home 2s infinite;
+                }
+            `;
+            
+            const style = document.createElement('style');
+            style.textContent = homepageStyles;
+            document.head.appendChild(style);
+        }
+        
+        // IPC Message Handlers
+        ipcRenderer.on('url-updated', (event, url) => {
+            updateSearchBar(url);
+            updateSecurityIcon(url);
+        });
+        
+        ipcRenderer.on('title-updated', (event, title) => {
+            updateTabTitle(title);
+        });
+        
+        ipcRenderer.on('navigation-updated', (event, { canGoBack, canGoForward }) => {
+            backBtn.disabled = !canGoBack;
+            forwardBtn.disabled = !canGoForward;
+        });
+        
+        ipcRenderer.on('loading-started', () => {
+            isLoading = true;
+            refreshBtn.innerHTML = '<i class="fas fa-times"></i>';
+            refreshBtn.setAttribute('data-tooltip', 'Stop loading');
+        });
+        
+        ipcRenderer.on('loading-stopped', () => {
+            isLoading = false;
+            refreshBtn.innerHTML = '<i class="fas fa-redo"></i>';
+            refreshBtn.setAttribute('data-tooltip', 'Refresh page');
+        });
+        
+        // Tab Management IPC Handlers
+        ipcRenderer.on('tabs-updated', (event, tabsData) => {
+            tabs = tabsData;
+            renderTabs();
+        });
+        
+        ipcRenderer.on('tab-updated', (event, tabData) => {
+            const tabIndex = tabs.findIndex(t => t.id === tabData.id);
+            if (tabIndex >= 0) {
+                tabs[tabIndex] = tabData;
+                renderTabs();
+            }
+        });
+        
+        ipcRenderer.on('active-tab-changed', (event, tabId) => {
+            activeTabId = tabId;
+            renderTabs();
+        });
+        
+        // Compatibility function aliases
+        function updateAddressBar(url) {
+            updateSearchBar(url);
+        }
+        
+        // Make functions globally available
+        window.selectSuggestion = selectSuggestion;
+        window.switchTab = switchTab;
+        window.closeTab = closeTab;
+        window.updateAddressBar = updateAddressBar;
+        
+        console.log('🚀 macOS style Vasudev Browser title bar loaded!');
+    </script>
+    
+</body>
+</html>
