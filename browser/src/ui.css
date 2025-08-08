@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+*{
+    font-family: monospace;
+}
+
+/* title-div */
+.title{
+box-shadow: rgba(255, 255, 255, 0.02) 0px 6px 24px 0px, rgba(96,190,197,0.10)0px 0px 0px 1px;
+}
+.left-div , .right-div{
+/* box-shadow: rgba(255, 255, 255, 0.08) 0px 6px 24px 0px, rgba(253, 252, 252, 0.08) 0px 0px 0px 1px; */
+box-shadow: 0 0 30px 1px rgba(96,190,197,0.10);
+transition: 0.2s;
+}
+/* .right-div{
+        
+} */
+.left-div:hover {
+    transform: scale(97%);
+    cursor: pointer;
+    box-shadow: rgba(255, 255, 255, 0.09) 0px 6px 24px 0px, rgba(253, 252, 252, 0.08) 0px 0px 0px 1px;
+}
+.right-div:hover{
+    transform: scale(97%);
+    cursor: pointer;
+    /* border: 1px solid #2d3592; */
+    box-shadow: 0 0 30px 1px rgba(96,190,197,0.30);
+}
+.icons-div{
+    transition: 0.2s;
+    cursor: pointer;
+
+}
+.icons-div:hover{
+    transform: scale(1.1);
+}
+/* title-div */
+
+/* homepage */
+.main{
+background: #22C1C3;
+background: linear-gradient(0deg, #2d3592
+ 0%, #0a0c24
+ 100%);
+}
+.text-logo{
+    text-shadow: 0 0 10px var(--neon-blue), 0 0 20px var(--neon-purple);
+}
+.text-logo{
+    line-height: 26px;
+}
+/* homepage */
