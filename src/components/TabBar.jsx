@@ -1,32 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 
 export default function TabBar({ tabs, activeTabId, onSelect, onClose, onNewTab, previews = {}, onHoverPreview, onToggleMute }) {
   const tabsRef = useRef(null);
-  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
-
-  useEffect(() => {
-    const el = tabsRef.current;
-    if (!el) return;
-    const activeEl = el.querySelector('.tab.active');
-    if (activeEl) {
-      const { offsetLeft, offsetWidth } = activeEl;
-      setIndicator({ left: offsetLeft + 6, width: Math.max(0, offsetWidth - 12) });
-    }
-  }, [activeTabId, tabs.length]);
-
-  useEffect(() => {
-    const onResize = () => {
-      const el = tabsRef.current;
-      if (!el) return;
-      const activeEl = el.querySelector('.tab.active');
-      if (activeEl) {
-        const { offsetLeft, offsetWidth } = activeEl;
-        setIndicator({ left: offsetLeft + 6, width: Math.max(0, offsetWidth - 12) });
-      }
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
 
   return (
     <div className="tabbar">
@@ -70,8 +45,7 @@ export default function TabBar({ tabs, activeTabId, onSelect, onClose, onNewTab,
             </div>
           </button>
         ))}
-        {/* Bottom indicator for active tab */}
-        <span className="tabbar-indicator" style={{ left: indicator.left, width: indicator.width }} aria-hidden="true" />
+        {/* Active tab underline is now handled via CSS ::after on .tab.active */}
         <button className="tab add" onClick={onNewTab} aria-label="New Tab">+</button>
       </div>
     </div>

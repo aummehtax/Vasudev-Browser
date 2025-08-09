@@ -1,7 +1,40 @@
-const { app, BrowserWindow, ipcMain, nativeTheme, session, shell, Menu, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeTheme, session, shell, Menu, clipboard, webContents } = require('electron');
 const path = require('path');
 
 let mainWindow;
+// Map: tabId -> { wcId, pid }
+const tabProcessMap = new Map();
+// Metrics sampling cache and control (to keep usage super lightweight)
+let metricsCache = { ts: 0, data: { ok: true, overall: { cpuPercent: 0, memoryKB: 0 }, perTab: [] } };
+let metricsTimer = null;
+let metricsSubscribers = 0;
+
+function collectMetricsNow() {
+  try {
+    const metrics = app.getAppMetrics?.() || [];
+    let totalCPU = 0;
+    let totalMemKB = 0;
+    for (const m of metrics) {
+      totalCPU += (m?.cpu?.percentCPUUsage || 0);
+      totalMemKB += (m?.memory?.workingSetSize || 0);
+    }
+    const perTab = [];
+    for (const [tabId, info] of tabProcessMap.entries()) {
+      const pid = info?.pid;
+      const mm = pid ? metrics.find(x => x.pid === pid) : undefined;
+      perTab.push({
+        tabId,
+        pid: pid || null,
+        cpuPercent: mm?.cpu?.percentCPUUsage || 0,
+        memoryKB: mm?.memory?.workingSetSize || 0,
+        processType: mm?.type || null
+      });
+    }
+    metricsCache = { ts: Date.now(), data: { ok: true, overall: { cpuPercent: totalCPU, memoryKB: totalMemKB }, perTab } };
+  } catch {
+    metricsCache = { ts: Date.now(), data: { ok: false, overall: { cpuPercent: 0, memoryKB: 0 }, perTab: [] } };
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -23,6 +56,62 @@ function createWindow() {
       webviewTag: true,
       spellcheck: false
     }
+  });
+
+  // Unregister a tab mapping when tab is closed
+  ipcMain.handle('unregister-tab', (_event, tabId) => {
+    try {
+      if (!tabId) return { ok: false };
+      tabProcessMap.delete(tabId);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  // Register a tab's webContents id with its OS process id
+  ipcMain.handle('register-tab-wc', (_event, payload) => {
+    try {
+      const { tabId, wcId } = payload || {};
+      if (!tabId || typeof wcId !== 'number') return { ok: false };
+      const wc = webContents.fromId?.(wcId);
+      const pid = wc?.getOSProcessId?.();
+      tabProcessMap.set(tabId, { wcId, pid });
+      return { ok: true, wcId, pid };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  // Return overall app metrics and per-tab usage (CPU %, memory KB)
+  ipcMain.handle('get-resource-usage', async () => {
+    try {
+      // If no active timer, refresh at most every 15s
+      if (!metricsTimer && Date.now() - metricsCache.ts > 15000) {
+        collectMetricsNow();
+      }
+      return metricsCache.data;
+    } catch {
+      return { ok: false, overall: { cpuPercent: 0, memoryKB: 0 }, perTab: [] };
+    }
+  });
+
+  // Lightweight sampling: renderer tells us when panel is open/closed
+  ipcMain.handle('metrics-start', () => {
+    metricsSubscribers++;
+    if (!metricsTimer) {
+      collectMetricsNow();
+      metricsTimer = setInterval(collectMetricsNow, 5000);
+    }
+    return { ok: true };
+  });
+  ipcMain.handle('metrics-stop', () => {
+    metricsSubscribers = Math.max(0, metricsSubscribers - 1);
+    if (metricsSubscribers === 0 && metricsTimer) {
+      clearInterval(metricsTimer);
+      metricsTimer = null;
+    }
+    return { ok: true };
   });
 
   // Context menu for main window contents

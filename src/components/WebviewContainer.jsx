@@ -1,11 +1,20 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
-const WebviewContainer = forwardRef(function WebviewContainer({ initialUrl, onUrlUpdate, onMetaUpdate, active = true }, ref) {
+const WebviewContainer = forwardRef(function WebviewContainer({ tabId, initialUrl, onUrlUpdate, onMetaUpdate, active = true }, ref) {
   const webviewEl = useRef(null);
 
   useEffect(() => {
     const wv = webviewEl.current;
     if (!wv) return;
+
+    const tryRegister = () => {
+      try {
+        const id = wv.getWebContentsId?.();
+        if (tabId && typeof id === 'number') {
+          window.api?.registerTabWebContents?.(tabId, id);
+        }
+      } catch {}
+    };
 
     const updateState = (url) => {
       onUrlUpdate?.(url, { canGoBack: wv.canGoBack(), canGoForward: wv.canGoForward() });
@@ -24,6 +33,7 @@ const WebviewContainer = forwardRef(function WebviewContainer({ initialUrl, onUr
         `);
         if (color) onMetaUpdate?.({ themeColor: color });
       } catch {}
+      tryRegister();
     };
     const handleTitle = (e) => onMetaUpdate?.({ title: e.title });
     const handleFavicon = (e) => {
@@ -44,6 +54,7 @@ const WebviewContainer = forwardRef(function WebviewContainer({ initialUrl, onUr
     wv.addEventListener('did-navigate', handleDidNavigate);
     wv.addEventListener('did-navigate-in-page', handleDidNavigateInPage);
     wv.addEventListener('did-finish-load', handleDidFinishLoad);
+    wv.addEventListener('dom-ready', tryRegister);
     wv.addEventListener('page-title-updated', handleTitle);
     wv.addEventListener('page-favicon-updated', handleFavicon);
     wv.addEventListener('did-change-theme-color', handleTheme);
@@ -57,6 +68,7 @@ const WebviewContainer = forwardRef(function WebviewContainer({ initialUrl, onUr
       wv.removeEventListener('did-navigate', handleDidNavigate);
       wv.removeEventListener('did-navigate-in-page', handleDidNavigateInPage);
       wv.removeEventListener('did-finish-load', handleDidFinishLoad);
+      wv.removeEventListener('dom-ready', tryRegister);
       wv.removeEventListener('page-title-updated', handleTitle);
       wv.removeEventListener('page-favicon-updated', handleFavicon);
       wv.removeEventListener('did-change-theme-color', handleTheme);
@@ -66,7 +78,7 @@ const WebviewContainer = forwardRef(function WebviewContainer({ initialUrl, onUr
       wv.removeEventListener('media-started-playing', handleMediaStart);
       wv.removeEventListener('media-paused', handleMediaPause);
     };
-  }, [onUrlUpdate, onMetaUpdate]);
+  }, [onUrlUpdate, onMetaUpdate, tabId]);
 
   useImperativeHandle(ref, () => ({
     navigate: (url) => {

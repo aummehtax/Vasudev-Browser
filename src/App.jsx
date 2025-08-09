@@ -3,6 +3,7 @@ import Titlebar from './components/Titlebar.jsx';
 import DownloadsPanel from './components/DownloadsPanel.jsx';
 import WebviewContainer from './components/WebviewContainer.jsx';
 import TabBar from './components/TabBar.jsx';
+import MetricsPanel from './components/MetricsPanel.jsx';
 
 const HOMEPAGE = new URL('homepage.html', window.location.href).href;
 
@@ -117,6 +118,69 @@ export default function App() {
     setCanGoForward(false);
   }, []);
 
+  // Metrics panel and polling (super lightweight)
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [metrics, setMetrics] = useState({ overall: { cpuPercent: 0, memoryKB: 0 }, perTab: [] });
+  useEffect(() => {
+    let timer = null;
+    let active = true; // active only when window focused and tab visible
+
+    const schedule = () => {
+      // poll every 5s, scheduled in idle time if possible
+      const run = async () => {
+        if (!active) return; // skip when inactive
+        try {
+          const res = await window.api?.getResourceUsage?.();
+          if (res && res.ok) {
+            // Avoid re-render if values barely changed
+            setMetrics(prev => {
+              const next = { overall: res.overall, perTab: res.perTab || [] };
+              try {
+                const a = prev.overall?.cpuPercent?.toFixed?.(1);
+                const b = next.overall?.cpuPercent?.toFixed?.(1);
+                const am = Math.round((prev.overall?.memoryKB || 0) / 1024);
+                const bm = Math.round((next.overall?.memoryKB || 0) / 1024);
+                if (a === b && am === bm && prev.perTab?.length === next.perTab?.length) {
+                  return prev;
+                }
+              } catch {}
+              return next;
+            });
+          }
+        } catch {}
+      };
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(() => {
+          run();
+          timer = window.setTimeout(schedule, 5000);
+        }, { timeout: 2000 });
+      } else {
+        run();
+        timer = window.setTimeout(schedule, 5000);
+      }
+    };
+
+    const onVisibility = () => { active = !document.hidden; };
+    const onFocus = () => { active = true; };
+    const onBlur = () => { active = false; };
+
+    if (showMetrics) {
+      try { window.api?.metricsStart?.(); } catch {}
+      active = !document.hidden;
+      window.addEventListener('focus', onFocus);
+      window.addEventListener('blur', onBlur);
+      document.addEventListener('visibilitychange', onVisibility);
+      schedule();
+      return () => {
+        window.removeEventListener('focus', onFocus);
+        window.removeEventListener('blur', onBlur);
+        document.removeEventListener('visibilitychange', onVisibility);
+        if (timer) clearTimeout(timer);
+        try { window.api?.metricsStop?.(); } catch {}
+      };
+    }
+  }, [showMetrics]);
+
   // Open link in new tab from native context menu
   useEffect(() => {
     const off = window.api?.onOpenNewTab?.((url) => {
@@ -146,6 +210,7 @@ export default function App() {
   }, []);
 
   const closeTab = useCallback((id) => {
+    try { window.api?.unregisterTab?.(id); } catch {}
     setTabs(prev => {
       const idx = prev.findIndex(t => t.id === id);
       if (idx === -1) return prev;
@@ -263,6 +328,7 @@ export default function App() {
           onHistory={() => {}}
           onDownload={handleToggleDownloads}
           onCopyLink={handleCopyLink}
+          onMetrics={() => setShowMetrics(v => !v)}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           themeColor={(tabs.find(t => t.id === activeTabId) || {}).themeColor}
@@ -282,12 +348,21 @@ export default function App() {
             <WebviewContainer
               key={t.id}
               ref={webviewRefs.current[t.id]}
+              tabId={t.id}
               initialUrl={t.url}
               active={t.id === activeTabId}
               onUrlUpdate={onUrlChange(t.id)}
               onMetaUpdate={(meta) => setTabs(prev => prev.map(tab => tab.id === t.id ? { ...tab, ...meta } : tab))}
             />
           ))}
+          {showMetrics && (
+            <MetricsPanel
+              overall={metrics.overall}
+              perTab={metrics.perTab}
+              tabs={tabs}
+              onClose={() => setShowMetrics(false)}
+            />
+          )}
           {showDownloads && (
             <DownloadsPanel
               downloads={downloads}
