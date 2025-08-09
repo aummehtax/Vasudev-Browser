@@ -193,12 +193,25 @@ webview {
   position: relative;
   overflow: visible;
 }
-.tab.active { background: #1a1f26; border-color: #2b323b; }
+.tab.active { background: #1a1f26; border-color: #2b323b; box-shadow: 0 6px 18px rgba(124,77,255,0.18), 0 2px 0 rgba(0,0,0,0.25) inset; }
 .tab-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tab-favicon { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
 .tab-close { opacity: 0.65; }
 .tab-close:hover { opacity: 1; }
 .tab.add { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Bottom-of-tabbar active indicator */
+.tabs { position: relative; }
+.tabbar-indicator {
+  position: absolute;
+  height: 3px;
+  bottom: -6px; /* sits below tabs bar, separate from shimmer */
+  background: linear-gradient(90deg, #7c4dff, #22d3ee);
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(124,77,255,0.5), 0 0 16px rgba(34,211,238,0.35);
+  transition: left 220ms cubic-bezier(0.2, 0.8, 0.2, 1), width 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
 
 /* Audio indicator */
 .tab .audio { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; opacity: .9; }

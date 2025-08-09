@@ -13,6 +13,7 @@ function createWindow() {
     frame: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#111315' : '#ffffff',
+    icon: path.join(__dirname, '../assets/icon.png'),
     hasShadow: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
