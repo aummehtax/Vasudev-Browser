@@ -114,6 +114,44 @@ function createWindow() {
     return { ok: true };
   });
 
+  // DevTools controls per-tab (Chrome-like): mode can be 'right' | 'bottom' | 'undocked' | 'detach'
+  ipcMain.handle('open-devtools', (_e, { tabId, mode = 'right' } = {}) => {
+    try {
+      const info = tabProcessMap.get(tabId);
+      if (!info) return { ok: false, error: 'TAB_NOT_FOUND' };
+      const wc = webContents.fromId(info.wcId);
+      if (!wc) return { ok: false, error: 'WC_NOT_FOUND' };
+      wc.openDevTools({ mode });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+  ipcMain.handle('close-devtools', (_e, { tabId } = {}) => {
+    try {
+      const info = tabProcessMap.get(tabId);
+      if (!info) return { ok: false, error: 'TAB_NOT_FOUND' };
+      const wc = webContents.fromId(info.wcId);
+      if (!wc) return { ok: false, error: 'WC_NOT_FOUND' };
+      wc.closeDevTools();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+  ipcMain.handle('toggle-devtools', (_e, { tabId, mode = 'right' } = {}) => {
+    try {
+      const info = tabProcessMap.get(tabId);
+      if (!info) return { ok: false, error: 'TAB_NOT_FOUND' };
+      const wc = webContents.fromId(info.wcId);
+      if (!wc) return { ok: false, error: 'WC_NOT_FOUND' };
+      if (wc.isDevToolsOpened()) wc.closeDevTools(); else wc.openDevTools({ mode });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
   // Context menu for main window contents
   const attachContextMenu = (contents) => {
     contents.on('context-menu', (_event, params) => {

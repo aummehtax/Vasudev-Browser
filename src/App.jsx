@@ -242,37 +242,42 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      const ctrl = e.ctrlKey || e.metaKey; // support Cmd on macOS if needed
-      // Ctrl+T => new tab
+      const ctrl = e.ctrlKey || e.metaKey;
+      // New tab
       if (ctrl && e.key.toLowerCase() === 't') { e.preventDefault(); createTab(); return; }
-      // Ctrl+W => close tab
+      // Close tab
       if (ctrl && e.key.toLowerCase() === 'w') { e.preventDefault(); closeTab(activeTabId); return; }
-      // Ctrl+Tab / Ctrl+Shift+Tab => next/prev tab
-      if (ctrl && e.key === 'Tab') {
-        e.preventDefault();
-        if (!tabs.length) return;
-        const idx = tabs.findIndex(t => t.id === activeTabId);
-        const nextIdx = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length;
-        selectTab(tabs[nextIdx].id);
-        return;
-      }
-      // Ctrl+L => focus address bar
+      // Reload
+      if (e.key === 'F5' || (ctrl && e.key.toLowerCase() === 'r')) { e.preventDefault(); handleReload(); return; }
+      // Focus address bar
       if (ctrl && e.key.toLowerCase() === 'l') {
         e.preventDefault();
         const input = document.querySelector('.addressbar input');
         if (input) { input.focus(); input.select?.(); }
         return;
       }
-      // F5 or Ctrl+R => reload
-      if (e.key === 'F5' || (ctrl && e.key.toLowerCase() === 'r')) {
+      // DevTools: F12 docked right (same window)
+      if (e.key === 'F12' && !e.shiftKey) {
         e.preventDefault();
-        handleReload();
+        try { window.api?.openDevTools?.({ tabId: activeTabId, mode: 'right' }); } catch {}
+        return;
+      }
+      // DevTools: Shift+F12 undocked (new window)
+      if (e.key === 'F12' && e.shiftKey) {
+        e.preventDefault();
+        try { window.api?.openDevTools?.({ tabId: activeTabId, mode: 'undocked' }); } catch {}
+        return;
+      }
+      // DevTools: Ctrl+Shift+I toggle (Chrome-like)
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        try { window.api?.toggleDevTools?.({ tabId: activeTabId, mode: 'right' }); } catch {}
         return;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [tabs, activeTabId, selectTab, createTab, closeTab, handleReload]);
+  }, [activeTabId, createTab, closeTab, handleReload]);
 
   // Downloads: panel + toast + history
   const [showDownloads, setShowDownloads] = useState(false);

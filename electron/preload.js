@@ -15,6 +15,9 @@ const api = {
   getResourceUsage: () => ipcRenderer.invoke('get-resource-usage'),
   metricsStart: () => ipcRenderer.invoke('metrics-start'),
   metricsStop: () => ipcRenderer.invoke('metrics-stop'),
+  openDevTools: ({ tabId, mode } = {}) => ipcRenderer.invoke('open-devtools', { tabId, mode }),
+  closeDevTools: ({ tabId } = {}) => ipcRenderer.invoke('close-devtools', { tabId }),
+  toggleDevTools: ({ tabId, mode } = {}) => ipcRenderer.invoke('toggle-devtools', { tabId, mode }),
   onDownloadProgress: (callback) => {
     const handler = (_e, data) => {
       try { callback?.(data); } catch {}
