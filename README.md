@@ -143,3 +143,80 @@ TBD
 ## Acknowledgements
 - Electron, React, Vite, electron-builder communities
 - Neon UI inspiration from modern macOS/Safari aesthetics
+
+---
+
+# AI Assistant (Comet‑like) for Vasudev Browser
+
+Vasudev Browser includes a Comet‑like AI assistant powered by Google Gemini. It provides persistent sidebar assistance, per‑tab session memory, highlight‑to‑ask, live page grounding, agentic actions with explicit permission gating, and an accuracy/citations UX for trustworthy answers.
+
+## Key AI Capabilities
+- __Persistent Assistant UI__: Always‑on sidebar `AISidebar` with conversation history per tab.
+- __Per‑Tab Session Memory__: Conversation state is stored in `localStorage` per active tab, keeping context isolated.
+- __Live Page Context Grounding__: Injects current page URL, title, visible text, selection, viewport and scroll state into prompts for relevant, grounded answers.
+- __Highlight‑to‑Ask__: Select text on the page and click “Use Selection” to ask directly about it.
+- __Agentic Actions Framework__: The assistant can propose action plans like navigate, scroll, click, and type. Actions only run after you approve them in‑app.
+- __Permission Panel__: In‑app non‑blocking approval UI summarizing proposed actions with Approve & Run / Cancel.
+- __Accuracy & Citations UX__: Answers separate the main body and “Sources” list, with clickable links opening in new tabs.
+- __Robust Fallbacks__: When the model cannot produce valid action JSON, deterministic heuristics handle common intents (e.g., “open youtube”, “search X on amazon”).
+
+## How It Works
+- Renderer component `src/components/AISidebar.jsx` handles input, calls Gemini (via IPC), renders responses, splits citations, and manages the permission panel.
+- Web automation lives in `src/components/WebviewContainer.jsx` exposing `performActions()` for:
+  - `navigate` (absolute https URLs)
+  - `scrollBy`, `scrollTo`
+  - `click` (via selector or `textContains`)
+  - `type` (selector + value)
+- Electron main `electron/main.js` provides IPC handlers for:
+  - Gemini completions with multi‑key fallback
+  - Background web search and content extraction with Readability (in hidden window or server‑mode fallback)
+
+## Quick Start (AI)
+1) __Set API Keys__
+   - Create `.env` at project root with one of:
+     ```env
+     GEMINI_API_KEY=your_key_here
+     # or multiple, comma‑separated (fallback rotation)
+     GEMINI_API_KEYS=key1,key2,key3
+     ```
+2) __Run Dev__
+   ```bash
+   npm install
+   npm run dev
+   ```
+3) __Open the AI Sidebar__
+   - Use the in‑app toggle (or the assigned shortcut) and start chatting.
+
+## Example Prompts
+- __Open a site__: “open youtube”, “open chatgpt”, “visit x.com”
+- __Search__: “search CodeCraft with Surya on youtube”, “search budget laptops on amazon”
+- __Ask about highlighted text__: Select text on a page → click “Use Selection”.
+- __Grounded Q&A__: “What does this page say about pricing?” (assistant uses live context).
+
+When an action plan is proposed, you’ll see a __permission panel__ with a bullet summary. Click __Approve & Run__ to execute.
+
+## Permissions & Safety
+- All agentic actions are gated by an in‑app permission panel.
+- Links in responses open in a new tab (no surprise navigation).
+- Navigation URLs are normalized to absolute https.
+
+## Troubleshooting (AI)
+- __“The action plan was not valid JSON”__
+  - The assistant now falls back to deterministic plans for common intents (open/search). If you still see this, try rephrasing or specify the site.
+- __“Script failed to execute” in Electron logs__
+  - Usually indicates an in‑page selector changed. Share the failing site/action and we’ll add a text‑based fallback or adjust selectors.
+- __`ERR_ABORTED (-3)` while loading URLs__
+  - In dev, navigations may be superseded by hot reloads. Re‑try the action after the app stabilizes.
+- __No sources shown__
+  - For questions requiring web research, the assistant performs background search and extraction; if content can’t be read (CSP, fetch blocked), it will note failed sources.
+
+## Roadmap (AI)
+- Per‑step toggles and explanations in the permission panel
+- Additional atomic actions (e.g., key presses, file uploads)
+- Deeper app integrations (email/calendar) with OAuth gating
+- Confidence cues and collapsible source details in the citations block
+
+## Contributing (AI)
+- Keep UI/UX consistent with the sidebar’s minimal, trustworthy design.
+- Prefer grounded answers; when in doubt, emit a plan or “[search] …” for retrieval.
+- Never auto‑execute actions; always request permission.
