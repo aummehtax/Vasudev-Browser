@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-export default function Titlebar({
+function Titlebar({
   address,
   onAddressChange,
   onAddressSubmit,
@@ -12,9 +12,11 @@ export default function Titlebar({
   onMetrics,
   onNewTab,
   onCopyLink,
+  onToggleAI,
   canGoBack,
   canGoForward,
-  themeColor
+  themeColor,
+  loading
 }) {
   // Suggestions state
   const [suggestions, setSuggestions] = useState([]);
@@ -92,9 +94,23 @@ export default function Titlebar({
     background: `linear-gradient(180deg, ${hexToRgba(themeColor, 0.22)}, ${hexToRgba(themeColor, 0.12)})`
   } : undefined;
 
+  const renderHighlighted = useCallback((text, query) => {
+    try {
+      if (!query) return text;
+      const q = (query + '').trim();
+      if (!q) return text;
+      const idx = text.toLowerCase().indexOf(q.toLowerCase());
+      if (idx === -1) return text;
+      const before = text.slice(0, idx);
+      const match = text.slice(idx, idx + q.length);
+      const after = text.slice(idx + q.length);
+      return (<>{before}<mark>{match}</mark>{after}</>);
+    } catch { return text; }
+  }, []);
+
   return (
     <div className="titlebar" style={style}>
-      <div className="nav">
+      <div className="nav" role="toolbar" aria-label="Navigation">
         <button className="icon" onClick={onBack} disabled={!canGoBack} title="Back" aria-label="Back">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -132,6 +148,21 @@ export default function Titlebar({
         />
         {open && suggestions.length > 0 && (
           <div className="omnibox-suggestions" role="listbox" ref={listRef}>
+            {!isProbablyUrl(address) && address?.trim() && (
+              <div
+                key={`search-hint`}
+                role="option"
+                aria-selected={activeIdx === -1}
+                className={`omnibox-item ${activeIdx === -1 ? 'active' : ''}`}
+                onMouseDown={(e) => { e.preventDefault(); commit(address); }}
+                title={`Search for ${address}`}
+              >
+                <span className="omnibox-icon" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 4a7 7 0 015.292 11.708l3 3a1 1 0 01-1.414 1.414l-3-3A7 7 0 1111 4zm0 2a5 5 0 100 10 5 5 0 000-10z" fill="currentColor"/></svg>
+                </span>
+                <span className="omnibox-text">Search for {renderHighlighted(String(address), String(address))}</span>
+              </div>
+            )}
             {suggestions.map((s, idx) => (
               <div
                 key={`${s}-${idx}`}
@@ -145,14 +176,26 @@ export default function Titlebar({
                 <span className="omnibox-icon" aria-hidden>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 4a7 7 0 015.292 11.708l3 3a1 1 0 01-1.414 1.414l-3-3A7 7 0 1111 4zm0 2a5 5 0 100 10 5 5 0 000-10z" fill="currentColor"/></svg>
                 </span>
-                <span className="omnibox-text">{s}</span>
+                <span className="omnibox-text">{renderHighlighted(String(s), String(address || ''))}</span>
               </div>
             ))}
+            <div className="omnibox-item" aria-hidden="true" style={{ justifyContent: 'space-between', opacity: .7 }}>
+              <span>Tips: Enter to go • Esc to close</span>
+              <span>↑/↓ to navigate</span>
+            </div>
           </div>
         )}
+        {loading && (<div className="addr-progress" aria-hidden="true" />)}
       </div>
 
-      <div className="actions">
+      <div className="actions" role="toolbar" aria-label="Actions">
+
+        <button className="icon" onClick={() => onToggleAI?.()} title="AI" aria-label="AI">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/>
+            <path d="M9 12l3-3 3 3-3 3-3-3z" fill="currentColor"/>
+          </svg>
+        </button>
         <button className="icon" onClick={onHistory} title="History" aria-label="History">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 8v5l3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -210,3 +253,5 @@ function hexToRgba(input, alpha = 1) {
     return input;
   }
 }
+
+export default React.memo(Titlebar);

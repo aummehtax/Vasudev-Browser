@@ -31,7 +31,16 @@ const api = {
     };
     ipcRenderer.on('open-new-tab', handler);
     return () => ipcRenderer.removeListener('open-new-tab', handler);
-  }
+  },
+  // Request opening a new tab from anywhere in the renderer
+  openNewTab: (url) => {
+    try { ipcRenderer.send('open-new-tab', url); } catch {}
+  },
+  aiCompleteGemini: ({ system, prompt }) => ipcRenderer.invoke('ai-complete-gemini', { system, prompt }),
+  performBackgroundSearch: (searchUrl) => ipcRenderer.invoke('perform-background-search', searchUrl),
+  extractContentFromUrls: (urls) => ipcRenderer.invoke('extract-content-from-urls', urls),
+  extractContentViaFetch: (urls) => ipcRenderer.invoke('extract-content-via-fetch', urls),
+  refineSearchQuery: (query) => ipcRenderer.invoke('refine-search-query', query)
 };
 
 // Back-compat + new name

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Titlebar from './components/Titlebar.jsx';
+import AISidebar from './components/AISidebar.jsx';
 import DownloadsPanel from './components/DownloadsPanel.jsx';
 import WebviewContainer from './components/WebviewContainer.jsx';
 import TabBar from './components/TabBar.jsx';
 import MetricsPanel from './components/MetricsPanel.jsx';
+import Titlebar from './components/Titlebar.jsx';
 
 const HOMEPAGE = new URL('homepage.html', window.location.href).href;
 
@@ -71,6 +72,28 @@ export default function App() {
   const [address, setAddress] = useState('');
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
+
+  // AI Sidebar visibility
+  const [showAI, setShowAI] = useState(false);
+
+  // Workspaces (basic)
+  const saveWorkspace = useCallback((name = `Workspace ${new Date().toLocaleString()}`) => {
+    try {
+      const ws = { id: Date.now().toString(36), name, tabs, activeTabId, createdAt: Date.now() };
+      const all = JSON.parse(localStorage.getItem('workspaces') || '[]');
+      all.unshift(ws);
+      localStorage.setItem('workspaces', JSON.stringify(all.slice(0, 20)));
+    } catch {}
+  }, [tabs, activeTabId]);
+  const loadWorkspace = useCallback((id) => {
+    try {
+      const all = JSON.parse(localStorage.getItem('workspaces') || '[]');
+      const ws = all.find(x => x.id === id) || all[0];
+      if (!ws) return;
+      setTabs(ws.tabs || []);
+      setActiveTabId(ws.activeTabId || (ws.tabs?.[0]?.id));
+    } catch {}
+  }, []);
 
   const getActiveRef = () => webviewRefs.current[activeTabId]?.current;
 
@@ -194,10 +217,15 @@ export default function App() {
   const requestPreview = useCallback(async (id) => {
     const ref = webviewRefs.current[id]?.current;
     if (!ref || !ref.capturePreview) return;
-    try {
-      const dataUrl = await ref.capturePreview();
-      if (dataUrl) setPreviews(prev => ({ ...prev, [id]: dataUrl }));
-    } catch {}
+    // Debounce per-tab capture to avoid rapid re-captures on hover
+    if (!requestPreview._timers) requestPreview._timers = {};
+    if (requestPreview._timers[id]) clearTimeout(requestPreview._timers[id]);
+    requestPreview._timers[id] = setTimeout(async () => {
+      try {
+        const dataUrl = await ref.capturePreview();
+        if (dataUrl) setPreviews(prev => ({ ...prev, [id]: dataUrl }));
+      } catch {}
+    }, 180);
   }, []);
   const toggleMute = useCallback(async (id) => {
     const ref = webviewRefs.current[id]?.current;
@@ -207,6 +235,40 @@ export default function App() {
       ref.setAudioMuted?.(!cur);
       setTabs(prev => prev.map(t => t.id === id ? { ...t, muted: !cur } : t));
     } catch {}
+  }, []);
+
+  // Pin/unpin tabs
+  const togglePin = useCallback((id) => {
+    setTabs(prev => {
+      const next = prev.map(t => t.id === id ? { ...t, pinned: !t.pinned } : t);
+      // Keep pinned tabs grouped on the left, preserve relative order within groups
+      const pinned = next.filter(t => t.pinned);
+      const normal = next.filter(t => !t.pinned);
+      return [...pinned, ...normal];
+    });
+  }, []);
+
+  // Reorder tabs via DnD
+  const reorderTabs = useCallback((fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setTabs(prev => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex(x => x.id === fromId);
+      const toIdx = arr.findIndex(x => x.id === toId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const [moved] = arr.splice(fromIdx, 1);
+      // If moving between pinned/non-pinned groups, keep constraint: pinned first
+      const targetPinned = arr[toIdx]?.pinned;
+      if (moved.pinned !== targetPinned) {
+        // Place moved in appropriate boundary
+        const pinnedEnd = arr.findLastIndex ? (arr.findLastIndex(t => t.pinned)) : (arr.map(t=>t.pinned).lastIndexOf(true));
+        const insertIdx = moved.pinned ? (Math.max(0, pinnedEnd + 1)) : (Math.max(0, (arr.findIndex(t => !t.pinned)))) ;
+        arr.splice(insertIdx, 0, moved);
+      } else {
+        arr.splice(toIdx, 0, moved);
+      }
+      return arr;
+    });
   }, []);
 
   const closeTab = useCallback((id) => {
@@ -274,16 +336,43 @@ export default function App() {
         try { window.api?.toggleDevTools?.({ tabId: activeTabId, mode: 'right' }); } catch {}
         return;
       }
+      // AI Sidebar: Ctrl+Shift+A
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setShowAI(v => !v);
+        return;
+      }
+      // Workspace quick save/load
+      if (ctrl && e.shiftKey && e.code === 'KeyS') { e.preventDefault(); saveWorkspace(); return; }
+      if (ctrl && e.shiftKey && e.code === 'KeyO') { e.preventDefault(); loadWorkspace(); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTabId, createTab, closeTab, handleReload]);
+  }, [activeTabId, createTab, closeTab, handleReload, saveWorkspace, loadWorkspace]);
 
   // Downloads: panel + toast + history
   const [showDownloads, setShowDownloads] = useState(false);
   const [downloads, setDownloads] = useState([]); // [{id, filename, url, state, receivedBytes, totalBytes, filePath, startedAt, completedAt}]
   const handleToggleDownloads = useCallback(() => setShowDownloads(v => !v), []);
   const [downloadToast, setDownloadToast] = useState(null);
+
+  // Load persisted downloads once
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('downloadsHistory');
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) setDownloads(list.slice(0, 50));
+      }
+    } catch {}
+  }, []);
+
+  // Persist downloads on change
+  useEffect(() => {
+    try {
+      localStorage.setItem('downloadsHistory', JSON.stringify(downloads.slice(0, 50)));
+    } catch {}
+  }, [downloads]);
   useEffect(() => {
     const off = window.api?.onDownloadProgress?.((data) => {
       // Update history list
@@ -320,7 +409,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="window-shell">
+    <div className="window-shell" style={{ '--site-theme': (tabs.find(t => t.id === activeTabId) || {}).themeColor || undefined }}>
       <div className="window">
         <Titlebar
           address={address}
@@ -334,9 +423,11 @@ export default function App() {
           onDownload={handleToggleDownloads}
           onCopyLink={handleCopyLink}
           onMetrics={() => setShowMetrics(v => !v)}
+          onToggleAI={() => setShowAI(v => !v)}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           themeColor={(tabs.find(t => t.id === activeTabId) || {}).themeColor}
+          loading={(tabs.find(t => t.id === activeTabId) || {}).isLoading}
         />
         <TabBar
           tabs={tabs}
@@ -347,8 +438,10 @@ export default function App() {
           onHoverPreview={requestPreview}
           previews={previews}
           onToggleMute={toggleMute}
+          onTogglePin={togglePin}
+          onReorder={reorderTabs}
         />
-        <div className="webviews">
+        <div className={`webviews ${showAI ? 'with-ai' : ''}`}>
           {tabs.map(t => (
             <WebviewContainer
               key={t.id}
@@ -368,6 +461,12 @@ export default function App() {
               onClose={() => setShowMetrics(false)}
             />
           )}
+          <AISidebar
+            visible={showAI}
+            onClose={() => setShowAI(false)}
+            activeTab={tabs.find(x => x.id === activeTabId)}
+            getActiveWebview={() => webviewRefs.current[activeTabId]?.current}
+          />
           {showDownloads && (
             <DownloadsPanel
               downloads={downloads}
@@ -378,7 +477,7 @@ export default function App() {
             />
           )}
           {downloadToast && (
-            <div className="download-toast">
+            <div className="download-toast" role="status" aria-live="polite">
               <div className="download-name">{downloadToast.filename}</div>
               <div className={`download-state ${downloadToast.state}`}>{downloadToast.state}</div>
               {typeof downloadToast.progress === 'number' && (
