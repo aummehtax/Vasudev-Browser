@@ -1,26 +1,67 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-export default function AISidebar({ visible, onClose, getActiveWebview }) {
+export default function AISidebar({ visible, onClose, getActiveWebview, activeTab }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [conversation, setConversation] = useState([]);
   const [question, setQuestion] = useState('');
+  const [pendingPlan, setPendingPlan] = useState(null); // { actions: [], summary: string, thinkingId: number, isFallback: boolean }
+  const [groundedHost, setGroundedHost] = useState('');
   const messagesEndRef = useRef(null);
+
+  // Storage key per-tab for session memory
+  const convoKey = useMemo(() => activeTab?.id ? `ai_convo_${activeTab.id}` : 'ai_convo_default', [activeTab?.id]);
 
   const systemPrompt = useMemo(() => (
     'You are an assistant embedded in a desktop browser. Be concise. Use bullet points when helpful. Avoid hallucinations. '
-    + 'Use ONLY the provided live context (URL, title, selection, viewport, scroll, text). If an answer is not present, say so.'
-  ), []);
+    + 'Use ONLY the provided live context (URL, title, selection, viewport, scroll, text). If an answer is not present, say so.\n\n'
+    + 'If the task requires interacting with the current page or navigating to complete a workflow, DO NOT answer directly.\n'
+    + 'Instead, output a single line that starts with "[actions]" followed by a JSON array of steps using this schema: \n'
+    + '[{"type":"navigate","url":"https://example.com"}, \n'
+    + ' {"type":"scrollBy","dy":800}, \n'
+    + ' {"type":"scrollTo","y":0}, \n'
+    + ' {"type":"click","selector":"button.buy", "textContains":"buy now"}, \n'
+    + ' {"type":"type","selector":"input[name=\"q\"]","value":"laptops under 60k"}]\n\n'
+    + 'Rules: Use minimal steps. Prefer selector when reliable; otherwise use textContains. Always use absolute https URLs for navigation. Return ONLY one of: a normal direct answer, or an [actions] JSON plan.\n'
+    + 'If no live context is available, you may still propose an [actions] plan using reasonable defaults, or emit a [search] query when web search is better.'
+  ), [activeTab?.id]);
 
   const getContext = useCallback(async () => {
     try {
       const wv = getActiveWebview?.();
       if (!wv) return null;
-      const ctx = await wv.getLiveContext?.(8000);
-      return ctx || null;
+      // retry a few times if page is loading
+      for (let i = 0; i < 4; i++) {
+        try {
+          const loading = typeof wv.isLoading === 'function' ? !!wv.isLoading() : false;
+          if (!loading) break;
+        } catch {}
+        // wait 250ms
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise(r => setTimeout(r, 250));
+      }
+      let ctx = null;
+      try { ctx = await wv.getLiveContext?.(8000); } catch {}
+      if (ctx && typeof ctx === 'object') return ctx;
+      // fallback: minimal context
+      let url = '';
+      try { url = String(wv.getURL?.() || ''); } catch {}
+      if (url) return { url, title: '', selectionText: '', viewport: {}, scroll: {}, text: '' };
+      return null;
     } catch { return null; }
   }, [getActiveWebview]);
+
+  // Load/save conversation per active tab
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(convoKey);
+      setConversation(raw ? JSON.parse(raw) : []);
+    } catch { setConversation([]); }
+  }, [convoKey]);
+  useEffect(() => {
+    try { localStorage.setItem(convoKey, JSON.stringify(conversation.slice(-200))); } catch {}
+  }, [convoKey, conversation]);
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
@@ -37,6 +78,7 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
 
     (async () => {
       let finalAnswer = '';
+      let handledByPanel = false;
       try {
         // Quick "open <site>" intent: immediately open in a new tab
         const qRaw = question.trim();
@@ -49,7 +91,8 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
             youtube: 'https://www.youtube.com/', yt: 'https://www.youtube.com/',
             instagram: 'https://www.instagram.com/', ig: 'https://www.instagram.com/',
             google: 'https://www.google.com/', gmail: 'https://mail.google.com/',
-            twitter: 'https://x.com/', x: 'https://x.com/', reddit: 'https://www.reddit.com/'
+            twitter: 'https://x.com/', x: 'https://x.com/', reddit: 'https://www.reddit.com/',
+            chatgpt: 'https://chat.openai.com/', chat: 'https://chat.openai.com/'
           };
           if (shortcuts[s.toLowerCase()]) return shortcuts[s.toLowerCase()];
           if (/^https?:\/\//i.test(s)) return s;
@@ -65,19 +108,76 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
             setBusy(false);
             return;
           }
-          // If not a URL, fall through to LLM/search
+          // Not a URL/shortcut: propose a Google search navigate as actions
+          const term = String(openIntent[2] || '').trim();
+          const actions = [ { type: 'navigate', url: `https://www.google.com/search?q=${encodeURIComponent(term)}` } ];
+          const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}`).join('\n');
+          setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (open):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+          setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: true });
+          handledByPanel = true;
+          setBusy(false);
+          return;
         }
+
+        // Deterministic "search ..." intent handling (avoids relying on LLM)
+        const searchMatch = /^(search|find|look up)\s+(?:for\s+)?(.+?)(?:\s+on\s+(youtube|yt|google|amazon|flipkart))?\s*$/i.exec(qRaw);
+        if (searchMatch) {
+          const qtext = searchMatch[2]?.trim() || '';
+          const site = (searchMatch[3] || '').toLowerCase();
+          let actions = [];
+          if (site === 'youtube' || site === 'yt') {
+            actions = [
+              { type: 'navigate', url: 'https://www.youtube.com/' },
+              { type: 'type', selector: 'input#search', value: qtext },
+              { type: 'click', selector: 'button#search-icon-legacy' }
+            ];
+          } else if (site === 'amazon') {
+            actions = [
+              { type: 'navigate', url: 'https://www.amazon.in' },
+              { type: 'type', selector: 'input#twotabsearchtextbox', value: qtext },
+              { type: 'click', selector: 'input#nav-search-submit-button' }
+            ];
+          } else if (site === 'flipkart') {
+            actions = [
+              { type: 'navigate', url: 'https://www.flipkart.com' },
+              { type: 'type', selector: 'input[name="q"]', value: qtext },
+              { type: 'click', selector: 'button[type="submit"]' }
+            ];
+          } else if (site === 'google' || !site) {
+            const url = `https://www.google.com/search?q=${encodeURIComponent(qtext)}`;
+            actions = [ { type: 'navigate', url } ];
+          }
+          const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+          setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (search):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+          setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: true });
+          handledByPanel = true;
+          setBusy(false);
+          return;
+        }
+
+        // Live page context
+        const ctx = await getContext();
+        try {
+          const u = ctx?.url || activeTab?.url || '';
+          const host = u ? new URL(u).host : '';
+          setGroundedHost(host || '');
+        } catch { setGroundedHost(''); }
+        const ctxText = ctx ? [
+          `URL: ${ctx.url || ''}`,
+          `Title: ${ctx.title || ''}`,
+          ctx.selectionText ? `Selection: ${ctx.selectionText}` : '',
+          ctx.text ? `VisibleText:\n${ctx.text}` : ''
+        ].filter(Boolean).join('\n') : 'No live context available.';
 
         const history = conversation.slice(-5).map(m => `${m.sender === 'user' ? 'User' : 'Assistant'}: ${m.text}`).join('\n');
         const masterSystemPrompt = [
-          'You are a helpful, conversational AI assistant in a web browser.',
-          'Your goal is to provide accurate, relevant, and concise answers.',
+          systemPrompt,
           '',
-          'You have two ways to answer:',
-          '1.  **Direct Answer:** If the user\'s question is general, conversational, or something you know, answer it directly.',
-          '2.  **Web Search:** If the question requires up-to-date information, specific facts, or deep knowledge, you must use a web search. To do this, you MUST respond with ONLY the string "[search]" followed by a single, optimized, keyword-rich search query. For example: `[search] best open source projects for beginners`.',
+          '--- LIVE CONTEXT ---',
+          ctxText,
+          '--------------------',
           '',
-          '**Conversation History:**',
+          'Conversation History (last 5):',
           history
         ].join('\n');
 
@@ -152,22 +252,113 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
               finalAnswer = finalAnswerText;
             }
           }
+        } else if (responseText.startsWith('[actions]')) {
+          // Agentic actions plan
+          const jsonPart = responseText.replace('[actions]', '').trim();
+          let actions = null;
+          try { actions = JSON.parse(jsonPart); } catch (e) { actions = null; }
+          if (!Array.isArray(actions)) {
+            // Heuristic fallback for common intents when model outputs bad JSON
+            const qRaw2 = qRaw;
+            const searchMatch2 = /^(search|find|look up)\s+(?:for\s+)?(.+?)(?:\s+on\s+(youtube|yt|google|amazon|flipkart))?\s*$/i.exec(qRaw2);
+            if (searchMatch2) {
+              const qtext = searchMatch2[2]?.trim() || '';
+              const site = (searchMatch2[3] || '').toLowerCase();
+              let heuristic = [];
+              if (site === 'youtube' || site === 'yt') {
+                heuristic = [
+                  { type: 'navigate', url: 'https://www.youtube.com/' },
+                  { type: 'type', selector: 'input#search', value: qtext },
+                  { type: 'click', selector: 'button#search-icon-legacy' }
+                ];
+              } else if (site === 'amazon') {
+                heuristic = [
+                  { type: 'navigate', url: 'https://www.amazon.in' },
+                  { type: 'type', selector: 'input#twotabsearchtextbox', value: qtext },
+                  { type: 'click', selector: 'input#nav-search-submit-button' }
+                ];
+              } else if (site === 'flipkart') {
+                heuristic = [
+                  { type: 'navigate', url: 'https://www.flipkart.com' },
+                  { type: 'type', selector: 'input[name="q"]', value: qtext },
+                  { type: 'click', selector: 'button[type="submit"]' }
+                ];
+              } else {
+                heuristic = [ { type: 'navigate', url: `https://www.google.com/search?q=${encodeURIComponent(qtext)}` } ];
+              }
+              const summary = heuristic.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (fallback):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+              setPendingPlan({ actions: heuristic, summary, thinkingId: thinkingMessageId, isFallback: true });
+              handledByPanel = true;
+              setBusy(false);
+              return;
+            }
+            finalAnswer = 'The action plan was not valid JSON. Please rephrase or be more specific.';
+          } else {
+            // Summarize actions for confirmation
+            const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}${a.textContains ? ` text~=${a.textContains}` : ''}${a.value ? ` value=\"${a.value.slice(0,60)}\"` : ''}`).join('\n');
+            setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions:\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+            setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: false });
+            handledByPanel = true;
+            setBusy(false);
+            return;
+          }
         } else {
-          // The AI decided to answer directly
-          finalAnswer = responseText;
+          // Fallback heuristic: if no context and the user asked to search/navigate/scroll, build a minimal actions plan
+          const imperative = /\b(search|open|visit|go to|scroll)\b/i.test(qRaw);
+          if (!ctx && imperative) {
+            // Extract a coarse query and optional site
+            const m = /search\s+for\s+(.+?)(\s+on\s+([\w.-]+))?$/i.exec(qRaw) || [];
+            const qtext = (m[1] || qRaw).replace(/\bon\b\s+[\w.-]+$/i, '').trim();
+            const site = (m[3] || '').toLowerCase();
+            let target = '';
+            if (site.includes('amazon')) target = 'https://www.amazon.in';
+            else if (site.includes('flipkart')) target = 'https://www.flipkart.com';
+            if (target) {
+              // Just navigate to site and scroll a bit
+              const actions = [
+                { type: 'navigate', url: target },
+                { type: 'scrollBy', dy: 800 }
+              ];
+              const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}`).join('\n');
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (fallback):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+              setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: true });
+              handledByPanel = true;
+              setBusy(false);
+              return;
+            } else {
+              // Use Google site search
+              const query = qtext ? `${qtext} site:amazon.in` : 'site:amazon.in';
+              const actions = [
+                { type: 'navigate', url: `https://www.google.com/search?q=${encodeURIComponent(query)}` },
+                { type: 'scrollBy', dy: 800 }
+              ];
+              const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}`).join('\n');
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (fallback):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+              setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: true });
+              handledByPanel = true;
+              setBusy(false);
+              return;
+            }
+          } else {
+            // The AI decided to answer directly
+            finalAnswer = responseText;
+          }
         }
       } catch (err) {
         const errorText = String(err?.message || err);
         setError(errorText);
         finalAnswer = `Sorry, an error occurred: ${errorText}`;
       } finally {
-        setConversation(prev => prev.map(msg => 
-          msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg
-        ));
-        setBusy(false);
+        if (!handledByPanel) {
+          setConversation(prev => prev.map(msg => 
+            msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg
+          ));
+          setBusy(false);
+        }
       }
     })();
-  }, [question, busy, getActiveWebview, systemPrompt, getContext]);
+  }, [question, busy, getActiveWebview, systemPrompt, getContext, conversation, activeTab?.url]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -179,6 +370,9 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
     <aside className="ai-sidebar" aria-label="AI Sidebar">
       <div className="ai-header">
         <div className="ai-title">AI Assistant</div>
+        {groundedHost ? (
+          <div className="ai-grounding" title={`Grounded to: ${groundedHost}`}>🔗 {groundedHost}</div>
+        ) : null}
         <button className="icon" onClick={onClose} aria-label="Close AI">✕</button>
       </div>
 
@@ -187,30 +381,69 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
           {conversation.map((msg, index) => (
             <div key={index} className={`ai-message-row ${msg.sender}`}>
               <div className={`ai-message ${msg.sender}`}>
-                <ReactMarkdown
-                  components={{
-                    a: ({node, href, children, ...props}) => (
-                      <a
-                        {...props}
-                        href={href}
-                        onClick={(e) => {
-                          try {
-                            if (href && window.api?.openNewTab) {
-                              e.preventDefault();
-                              window.api.openNewTab(href);
-                            }
-                          } catch {}
+                {(() => {
+                  const text = msg.text || '';
+                  const splitToken = '\n\n**Sources:**\n';
+                  const hasSources = text.includes(splitToken);
+                  const [body, sources] = hasSources ? text.split(splitToken) : [text, null];
+                  return (
+                    <>
+                      <ReactMarkdown
+                        components={{
+                          a: ({node, href, children, ...props}) => (
+                            <a
+                              {...props}
+                              href={href}
+                              onClick={(e) => {
+                                try {
+                                  if (href && window.api?.openNewTab) {
+                                    e.preventDefault();
+                                    window.api.openNewTab(href);
+                                  }
+                                } catch {}
+                              }}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                            >
+                              {children}
+                            </a>
+                          )
                         }}
-                        target="_blank"
-                        rel="noreferrer noopener"
                       >
-                        {children}
-                      </a>
-                    )
-                  }}
-                >
-                  {msg.text || ''}
-                </ReactMarkdown>
+                        {body}
+                      </ReactMarkdown>
+                      {sources ? (
+                        <div className="ai-citations">
+                          <div className="ai-citations-title">Sources</div>
+                          <ReactMarkdown
+                            components={{
+                              a: ({node, href, children, ...props}) => (
+                                <a
+                                  {...props}
+                                  href={href}
+                                  onClick={(e) => {
+                                    try {
+                                      if (href && window.api?.openNewTab) {
+                                        e.preventDefault();
+                                        window.api.openNewTab(href);
+                                      }
+                                    } catch {}
+                                  }}
+                                  target="_blank"
+                                  rel="noreferrer noopener"
+                                >
+                                  {children}
+                                </a>
+                              )
+                            }}
+                          >
+                            {sources}
+                          </ReactMarkdown>
+                        </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           ))}
@@ -236,6 +469,53 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
 
       <div className="ai-input-area">
         {error && <div className="ai-error" role="alert">{error}</div>}
+        {pendingPlan && (
+          <div className="ai-permission-panel" role="dialog" aria-modal="true">
+            <div className="ai-permission-title">Review proposed actions {pendingPlan.isFallback ? '(fallback)' : ''}</div>
+            <pre className="ai-permission-summary">{pendingPlan.summary}</pre>
+            <div className="ai-permission-actions">
+              <button
+                className="btn"
+                onClick={async () => {
+                  try {
+                    setBusy(true);
+                    const wv = getActiveWebview?.();
+                    if (!wv?.performActions) {
+                      setConversation(prev => prev.map(msg => msg.id === pendingPlan.thinkingId ? { ...msg, text: 'Actions not available for the current tab.', isThinking: false } : msg));
+                      setPendingPlan(null);
+                      setBusy(false);
+                      return;
+                    }
+                    const norm = pendingPlan.actions.map(a => {
+                      if (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) {
+                        return { ...a, url: `https://${a.url}` };
+                      }
+                      return a;
+                    });
+                    setConversation(prev => prev.map(msg => msg.id === pendingPlan.thinkingId ? { ...msg, text: 'Executing approved actions...', isThinking: true } : msg));
+                    const results = await wv.performActions(norm);
+                    const lines = results.map((r, i) => `  ${i+1}. ${r.action?.type || '?'} -> ${r.ok ? 'ok' : `error: ${r.error}`}`).join('\n');
+                    setConversation(prev => prev.map(msg => msg.id === pendingPlan.thinkingId ? { ...msg, text: `Executed actions. Results:\n${lines}`, isThinking: false } : msg));
+                  } catch (e) {
+                    setConversation(prev => prev.map(msg => msg.id === pendingPlan.thinkingId ? { ...msg, text: `Failed to execute actions: ${String(e?.message || e)}`, isThinking: false } : msg));
+                  } finally {
+                    setPendingPlan(null);
+                    setBusy(false);
+                  }
+                }}
+                disabled={busy}
+              >Approve & Run</button>
+              <button
+                className="btn secondary"
+                onClick={() => {
+                  setConversation(prev => prev.map(msg => msg.id === pendingPlan.thinkingId ? { ...msg, text: 'Cancelled execution.', isThinking: false } : msg));
+                  setPendingPlan(null);
+                }}
+                disabled={busy}
+              >Cancel</button>
+            </div>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="ai-input-form">
           <textarea
             rows={1}
@@ -250,6 +530,32 @@ export default function AISidebar({ visible, onClose, getActiveWebview }) {
             }}
             disabled={busy}
           />
+          <button
+            type="button"
+            className="btn secondary"
+            title="Ask about current selection"
+            onClick={async () => {
+              try {
+                // try twice with a small delay for selection to be available
+                let ctx = await getContext();
+                let sel = (ctx?.selectionText || '').trim();
+                if (!sel) {
+                  await new Promise(r => setTimeout(r, 200));
+                  ctx = await getContext();
+                  sel = (ctx?.selectionText || '').trim();
+                }
+                if (sel) {
+                  setQuestion(q => q?.trim() ? `${q}\n\n${sel}` : `Explain: ${sel}`);
+                } else {
+                  setError('No text selected on the page.');
+                  setTimeout(() => setError(null), 2500);
+                }
+              } catch {}
+            }}
+            disabled={busy}
+          >
+            Use Selection
+          </button>
           <button type="submit" className="btn" disabled={busy || !question.trim()} aria-label="Send Message">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
