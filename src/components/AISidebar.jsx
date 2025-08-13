@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import createOrchestrator from '../assistant/orchestrator';
+import { validatePlan } from '../assistant/policy';
 
 export default function AISidebar({ visible, onClose, getActiveWebview, activeTab }) {
   const [busy, setBusy] = useState(false);
@@ -8,7 +10,15 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
   const [question, setQuestion] = useState('');
   const [pendingPlan, setPendingPlan] = useState(null); // { actions: [], summary: string, thinkingId: number, isFallback: boolean }
   const [groundedHost, setGroundedHost] = useState('');
+  const [selectedSteps, setSelectedSteps] = useState([]); // booleans per action index
+  const [handsFree, setHandsFree] = useState(() => {
+    try { return localStorage.getItem('ai_hands_free') === '1'; } catch { return false; }
+  });
   const messagesEndRef = useRef(null);
+  const orchestratorRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const [listening, setListening] = useState(false);
+  const [sttSupported, setSttSupported] = useState(false);
 
   // Storage key per-tab for session memory
   const convoKey = useMemo(() => activeTab?.id ? `ai_convo_${activeTab.id}` : 'ai_convo_default', [activeTab?.id]);
@@ -62,6 +72,101 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
   useEffect(() => {
     try { localStorage.setItem(convoKey, JSON.stringify(conversation.slice(-200))); } catch {}
   }, [convoKey, conversation]);
+
+  useEffect(() => {
+    try { localStorage.setItem('ai_hands_free', handsFree ? '1' : '0'); } catch {}
+  }, [handsFree]);
+
+  // Visual indicator: toggle body class for hands-free mode
+  useEffect(() => {
+    const cls = 'hands-free-active';
+    try {
+      if (handsFree) {
+        document.body.classList.add(cls);
+      } else {
+        document.body.classList.remove(cls);
+      }
+    } catch {}
+    return () => {
+      try { document.body.classList.remove(cls); } catch {}
+    };
+  }, [handsFree]);
+
+  // Create orchestrator once
+  useEffect(() => {
+    if (!orchestratorRef.current) {
+      orchestratorRef.current = createOrchestrator({});
+    }
+  }, []);
+
+  // Initialize SpeechRecognition (voice input)
+  useEffect(() => {
+    try {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { setSttSupported(false); return; }
+      setSttSupported(true);
+      const rec = new SR();
+      rec.lang = 'hi-IN'; // prioritize Hindi; recognizer can still pick English
+      rec.interimResults = true;
+      rec.continuous = false;
+      let finalTranscript = '';
+
+      rec.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i];
+          if (res.isFinal) finalTranscript += res[0].transcript;
+          else interim += res[0].transcript;
+        }
+        // show interim by reflecting in the input without committing
+        if (interim) {
+          setQuestion(prev => prev && !prev.endsWith(' ') ? prev + ' ' + interim : (prev || '') + interim);
+        }
+      };
+      rec.onerror = () => { setListening(false); };
+      rec.onend = () => {
+        setListening(false);
+        // commit final transcript into the input field
+        if (finalTranscript && finalTranscript.trim()) {
+          setQuestion(prev => {
+            const base = (prev || '').replace(/\s+$/,'');
+            return base ? base + ' ' + finalTranscript.trim() : finalTranscript.trim();
+          });
+        }
+        finalTranscript = '';
+      };
+      recognitionRef.current = rec;
+      return () => { try { rec.abort(); } catch {} };
+    } catch {}
+  }, []);
+
+  const toggleListening = useCallback(() => {
+    try {
+      if (!recognitionRef.current) return;
+      if (listening) {
+        recognitionRef.current.stop();
+        setListening(false);
+      } else {
+        // switch language dynamically based on groundedHost if useful
+        try {
+          if (recognitionRef.current && groundedHost) {
+            recognitionRef.current.lang = 'hi-IN';
+          }
+        } catch {}
+        recognitionRef.current.start();
+        setListening(true);
+      }
+    } catch {}
+  }, [listening, groundedHost]);
+
+  // Initialize per-step toggles whenever a new plan arrives
+  useEffect(() => {
+    if (pendingPlan && Array.isArray(pendingPlan.actions)) {
+      setSelectedSteps(pendingPlan.actions.map(() => true));
+    } else {
+      setSelectedSteps([]);
+    }
+  }, [pendingPlan]);
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
@@ -147,9 +252,26 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
             const url = `https://www.google.com/search?q=${encodeURIComponent(qtext)}`;
             actions = [ { type: 'navigate', url } ];
           }
-          const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+          const v = validatePlan(actions);
+          if (!v.ok) {
+            finalAnswer = `Plan validation failed: ${v.errors.join(', ')}`;
+            setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg));
+            setBusy(false);
+            return;
+          }
+          const summary = v.plan.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+          if (handsFree) {
+            const wv = getActiveWebview?.();
+            const norm = v.plan.map(a => (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) ? { ...a, url: `https://${a.url}` } : a);
+            setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: 'Executing (hands-free)...', isThinking: true } : msg));
+            const results = await wv.performActions(norm);
+            const lines = results.map((r, i) => `  ${i+1}. ${r.action?.type || '?'} -> ${r.ok ? 'ok' : `error: ${r.error}`}`).join('\n');
+            setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Executed actions. Results:\n${lines}`, isThinking: false } : msg));
+            setBusy(false);
+            return;
+          }
           setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (search):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
-          setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: true });
+          setPendingPlan({ actions: v.plan, summary, thinkingId: thinkingMessageId, isFallback: true });
           handledByPanel = true;
           setBusy(false);
           return;
@@ -180,6 +302,46 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
           'Conversation History (last 5):',
           history
         ].join('\n');
+
+        // Orchestrator first: try deterministic plan without LLM
+        try {
+          const orch = orchestratorRef.current;
+          if (orch) {
+            const o = await orch.run({ input: question, context: ctx, tabId: activeTab?.id });
+            if (o?.ok && Array.isArray(o.plan) && o.plan.length > 0) {
+              const v = validatePlan(o.plan);
+              if (!v.ok) {
+                finalAnswer = `Plan validation failed: ${v.errors.join(', ')}`;
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg));
+                setBusy(false);
+                return;
+              }
+              const actions = v.plan;
+              const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+              if (handsFree) {
+                const wv = getActiveWebview?.();
+                if (!wv?.performActions) {
+                  finalAnswer = 'Actions not available for the current tab.';
+                  setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg));
+                  setBusy(false);
+                  return;
+                }
+                const norm = actions.map(a => (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) ? { ...a, url: `https://${a.url}` } : a);
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: 'Executing (hands-free)...', isThinking: true } : msg));
+                const results = await wv.performActions(norm);
+                const lines = results.map((r, i) => `  ${i+1}. ${r.action?.type || '?'} -> ${r.ok ? 'ok' : `error: ${r.error}`}`).join('\n');
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Executed actions. Results:\n${lines}`, isThinking: false } : msg));
+                setBusy(false);
+                return;
+              }
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (orchestrator):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
+              setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: false });
+              handledByPanel = true;
+              setBusy(false);
+              return;
+            }
+          }
+        } catch {}
 
         const initialResponse = await window.api.aiCompleteGemini({ system: masterSystemPrompt, prompt: question });
 
@@ -286,9 +448,26 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
               } else {
                 heuristic = [ { type: 'navigate', url: `https://www.google.com/search?q=${encodeURIComponent(qtext)}` } ];
               }
-              const summary = heuristic.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+              const v = validatePlan(heuristic);
+              if (!v.ok) {
+                finalAnswer = `Plan validation failed: ${v.errors.join(', ')}`;
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg));
+                setBusy(false);
+                return;
+              }
+              const summary = v.plan.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}`).join('\n');
+              if (handsFree) {
+                const wv = getActiveWebview?.();
+                const norm = v.plan.map(a => (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) ? { ...a, url: `https://${a.url}` } : a);
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: 'Executing (hands-free)...', isThinking: true } : msg));
+                const results = await wv.performActions(norm);
+                const lines = results.map((r, i) => `  ${i+1}. ${r.action?.type || '?'} -> ${r.ok ? 'ok' : `error: ${r.error}`}`).join('\n');
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Executed actions. Results:\n${lines}`, isThinking: false } : msg));
+                setBusy(false);
+                return;
+              }
               setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (fallback):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
-              setPendingPlan({ actions: heuristic, summary, thinkingId: thinkingMessageId, isFallback: true });
+              setPendingPlan({ actions: v.plan, summary, thinkingId: thinkingMessageId, isFallback: true });
               handledByPanel = true;
               setBusy(false);
               return;
@@ -296,9 +475,26 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
             finalAnswer = 'The action plan was not valid JSON. Please rephrase or be more specific.';
           } else {
             // Summarize actions for confirmation
-            const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}${a.textContains ? ` text~=${a.textContains}` : ''}${a.value ? ` value=\"${a.value.slice(0,60)}\"` : ''}`).join('\n');
+            const v = validatePlan(actions);
+            if (!v.ok) {
+              finalAnswer = `Plan validation failed: ${v.errors.join(', ')}`;
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg));
+              setBusy(false);
+              return;
+            }
+            const summary = v.plan.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}${a.selector ? ` selector=${a.selector}` : ''}${a.textContains ? ` text~=${a.textContains}` : ''}${a.value ? ` value=\"${String(a.value).slice(0,60)}\"` : ''}`).join('\n');
+            if (handsFree) {
+              const wv = getActiveWebview?.();
+              const norm = v.plan.map(a => (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) ? { ...a, url: `https://${a.url}` } : a);
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: 'Executing (hands-free)...', isThinking: true } : msg));
+              const results = await wv.performActions(norm);
+              const lines = results.map((r, i) => `  ${i+1}. ${r.action?.type || '?'} -> ${r.ok ? 'ok' : `error: ${r.error}`}`).join('\n');
+              setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Executed actions. Results:\n${lines}`, isThinking: false } : msg));
+              setBusy(false);
+              return;
+            }
             setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions:\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
-            setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: false });
+            setPendingPlan({ actions: v.plan, summary, thinkingId: thinkingMessageId, isFallback: false });
             handledByPanel = true;
             setBusy(false);
             return;
@@ -320,9 +516,26 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
                 { type: 'navigate', url: target },
                 { type: 'scrollBy', dy: 800 }
               ];
-              const summary = actions.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}`).join('\n');
+              const v = validatePlan(actions);
+              if (!v.ok) {
+                finalAnswer = `Plan validation failed: ${v.errors.join(', ')}`;
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: finalAnswer, isThinking: false } : msg));
+                setBusy(false);
+                return;
+              }
+              const summary = v.plan.map((a, i) => `  ${i+1}. ${a.type}${a.url ? ` -> ${a.url}` : ''}`).join('\n');
+              if (handsFree) {
+                const wv = getActiveWebview?.();
+                const norm = v.plan.map(a => (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) ? { ...a, url: `https://${a.url}` } : a);
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: 'Executing (hands-free)...', isThinking: true } : msg));
+                const results = await wv.performActions(norm);
+                const lines = results.map((r, i) => `  ${i+1}. ${r.action?.type || '?'} -> ${r.ok ? 'ok' : `error: ${r.error}`}`).join('\n');
+                setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Executed actions. Results:\n${lines}`, isThinking: false } : msg));
+                setBusy(false);
+                return;
+              }
               setConversation(prev => prev.map(msg => msg.id === thinkingMessageId ? { ...msg, text: `Proposed actions (fallback):\n${summary}\n\nReview and approve below.`, isThinking: false } : msg));
-              setPendingPlan({ actions, summary, thinkingId: thinkingMessageId, isFallback: true });
+              setPendingPlan({ actions: v.plan, summary, thinkingId: thinkingMessageId, isFallback: true });
               handledByPanel = true;
               setBusy(false);
               return;
@@ -373,6 +586,22 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
         {groundedHost ? (
           <div className="ai-grounding" title={`Grounded to: ${groundedHost}`}>🔗 {groundedHost}</div>
         ) : null}
+        <button
+          className="icon"
+          onClick={toggleListening}
+          disabled={!sttSupported}
+          title={sttSupported ? (listening ? 'Stop voice input' : 'Start voice input (Hindi/English)') : 'Voice input not supported in this build'}
+          aria-pressed={listening}
+          aria-label="Voice input"
+        >{listening ? '🎙️•' : '🎙️'}</button>
+        <label className="ai-toggle" title="Auto-approve action plans (hands-free)">
+          <input
+            type="checkbox"
+            checked={handsFree}
+            onChange={(e) => setHandsFree(!!e.target.checked)}
+          />
+          <span style={{ marginLeft: 6 }}>Hands-free</span>
+        </label>
         <button className="icon" onClick={onClose} aria-label="Close AI">✕</button>
       </div>
 
@@ -473,6 +702,24 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
           <div className="ai-permission-panel" role="dialog" aria-modal="true">
             <div className="ai-permission-title">Review proposed actions {pendingPlan.isFallback ? '(fallback)' : ''}</div>
             <pre className="ai-permission-summary">{pendingPlan.summary}</pre>
+            <div className="ai-per-step-toggles">
+              {pendingPlan.actions?.map((a, i) => (
+                <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedSteps[i] ?? true}
+                    onChange={(e) => {
+                      const next = [...selectedSteps];
+                      next[i] = !!e.target.checked;
+                      setSelectedSteps(next);
+                    }}
+                  />
+                  <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                    {i+1}. {a.type}{a.url ? ` -> ${a.url}` : ''}{a.selector ? ` selector=${a.selector}` : ''}{a.textContains ? ` text~=${a.textContains}` : ''}{a.value ? ` value="${String(a.value).slice(0,40)}"` : ''}
+                  </span>
+                </label>
+              ))}
+            </div>
             <div className="ai-permission-actions">
               <button
                 className="btn"
@@ -486,7 +733,14 @@ export default function AISidebar({ visible, onClose, getActiveWebview, activeTa
                       setBusy(false);
                       return;
                     }
-                    const norm = pendingPlan.actions.map(a => {
+                    const chosen = pendingPlan.actions.filter((_, i) => selectedSteps[i] !== false);
+                    if (chosen.length === 0) {
+                      setConversation(prev => prev.map(msg => msg.id === pendingPlan.thinkingId ? { ...msg, text: 'No steps selected. Cancelled.', isThinking: false } : msg));
+                      setPendingPlan(null);
+                      setBusy(false);
+                      return;
+                    }
+                    const norm = chosen.map(a => {
                       if (a?.type === 'navigate' && a.url && !/^https?:\/\//i.test(a.url)) {
                         return { ...a, url: `https://${a.url}` };
                       }

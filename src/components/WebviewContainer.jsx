@@ -163,7 +163,14 @@ const WebviewContainer = forwardRef(function WebviewContainer({ tabId, initialUr
       const waitForLoadComplete = async (timeout = 20000) => {
         const start = Date.now();
         while (Date.now() - start < timeout) {
-          try { if (!webviewEl.current?.isLoading?.()) return true; } catch {}
+          try {
+            const loading = !!webviewEl.current?.isLoading?.();
+            if (!loading) {
+              // also ensure DOM ready
+              const ready = await exec(`document.readyState`);
+              if (ready === 'interactive' || ready === 'complete') return true;
+            }
+          } catch {}
           await wait(150);
         }
         return false;
@@ -216,63 +223,114 @@ const WebviewContainer = forwardRef(function WebviewContainer({ tabId, initialUr
         if (type === 'click') {
           const selector = String(action.selector || '');
           const textContains = String(action.textContains || '').toLowerCase();
-          // If selector provided, wait briefly for it
           if (selector) await waitForSelector(selector, 6000);
-          const js = `(() => {
-            function visible(el){ const r = el.getBoundingClientRect(); return r && r.width>0 && r.height>0; }
-            let el = null;
-            const sel = ${JSON.stringify(selector)};
-            if (sel){ el = document.querySelector(sel); }
-            if (!el && ${JSON.stringify(!!textContains)} ){
-              const all = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"],[role="button"], [aria-label]'));
-              el = all.find(e => ((e.innerText||e.value||e.getAttribute('aria-label')||'')+"").toLowerCase().includes(${JSON.stringify(textContains)}));
-            }
-            if (!el || !visible(el)) return { ok:false, error:'NOT_FOUND' };
-            try { el.scrollIntoView({behavior:'smooth', block:'center'}); } catch {}
-            try { el.focus(); } catch {}
-            try { el.click(); } catch(e) { return { ok:false, error:String(e?.message||e) }; }
-            return { ok:true };
-          })();`;
-          const res = await exec(js);
-          return res && typeof res === 'object' ? res : { ok: true };
+          const attempt = async () => {
+            const js = `(() => {
+              function visible(el){ const r = el.getBoundingClientRect(); return r && r.width>0 && r.height>0; }
+              let el = null;
+              const sel = ${JSON.stringify(selector)};
+              if (sel){ el = document.querySelector(sel); }
+              if (!el && ${JSON.stringify(!!textContains)} ){
+                const all = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"],[role="button"], [aria-label]'));
+                el = all.find(e => ((e.innerText||e.value||e.getAttribute('aria-label')||'')+"").toLowerCase().includes(${JSON.stringify(textContains)}));
+              }
+              if (!el || !visible(el)) return { ok:false, error:'NOT_FOUND' };
+              try { el.scrollIntoView({behavior:'smooth', block:'center'}); } catch {}
+              try { el.focus(); } catch {}
+              try { el.click(); } catch(e) { return { ok:false, error:String(e?.message||e) }; }
+              return { ok:true };
+            })();`;
+            const res = await exec(js);
+            return res && typeof res === 'object' ? res : { ok: true };
+          };
+          // retry up to 3 times with small scrolls
+          for (let i=0;i<3;i++) {
+            const r = await attempt();
+            if (r?.ok) return r;
+            await exec(`window.scrollBy(0, ${400 + i*200}); true;`);
+            await wait(200);
+          }
+          return { ok:false, error:'CLICK_FAILED' };
         }
         if (type === 'type') {
           const selector = String(action.selector || '');
           const value = String(action.value || '');
           if (selector) await waitForSelector(selector, 6000);
+          const attempt = async () => {
+            const js = `(() => {
+              let el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { ok:false, error:'NOT_FOUND' };
+              const isEditable = (e) => e && (e.tagName==='INPUT' || e.tagName==='TEXTAREA' || e.isContentEditable);
+              if (!isEditable(el)) {
+                const candidate = el.querySelector('input,textarea,[contenteditable="true"]');
+                if (candidate) el = candidate;
+              }
+              if (!isEditable(el)) return { ok:false, error:'NOT_EDITABLE' };
+              try { el.focus(); } catch {}
+              try { el.select?.(); } catch {}
+              try { el.value = ${JSON.stringify(value)}; } catch {}
+              try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch {}
+              try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+              return { ok:true };
+            })();`;
+            const res = await exec(js);
+            return res && typeof res === 'object' ? res : { ok: true };
+          };
+          for (let i=0;i<2;i++) {
+            const r = await attempt();
+            if (r?.ok) return r;
+            await wait(150);
+          }
+          return { ok:false, error:'TYPE_FAILED' };
+        }
+        if (type === 'pressEnter') {
+          const selector = String(action.selector || '');
+          if (selector) await waitForSelector(selector, 6000);
           const js = `(() => {
-            let el = document.querySelector(${JSON.stringify(selector)});
-            if (!el) return { ok:false, error:'NOT_FOUND' };
-            const isEditable = (e) => e && (e.tagName==='INPUT' || e.tagName==='TEXTAREA' || e.isContentEditable);
-            if (!isEditable(el)) {
-              const candidate = el.querySelector('input,textarea,[contenteditable="true"]');
-              if (candidate) el = candidate;
-            }
-            if (!isEditable(el)) return { ok:false, error:'NOT_EDITABLE' };
+            let el = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : 'document.activeElement'};
+            if (!el) return { ok:false, error:'NO_TARGET' };
             try { el.focus(); } catch {}
-            try { el.select?.(); } catch {}
-            try { el.value = ${JSON.stringify(value)}; } catch {}
-            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch {}
-            try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+            const fire = (name) => el.dispatchEvent(new KeyboardEvent(name, { key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true }));
+            try { fire('keydown'); fire('keypress'); fire('keyup'); } catch(e){ return { ok:false, error:String(e?.message||e) }; }
             return { ok:true };
           })();`;
           const res = await exec(js);
           return res && typeof res === 'object' ? res : { ok: true };
         }
+        if (type === 'waitFor') {
+          const selector = String(action.selector || '');
+          const textContains = String(action.textContains || '').toLowerCase();
+          const timeout = Number(action.timeout || 6000);
+          const start = Date.now();
+          while (Date.now() - start < timeout) {
+            const ok = await exec(`(() => {
+              const txt = ${JSON.stringify(textContains)};
+              const sel = ${JSON.stringify(selector)};
+              if (sel && document.querySelector(sel)) return true;
+              if (txt) {
+                const bodyText = (document.body?.innerText||'').toLowerCase();
+                if (bodyText.includes(txt)) return true;
+              }
+              return false;
+            })();`);
+            if (ok === true) return { ok:true };
+            await wait(200);
+          }
+          return { ok:false, error:'WAIT_TIMEOUT' };
+        }
         return { ok: false, error: 'UNKNOWN_ACTION' };
       } catch (e) {
         return { ok: false, error: String(e?.message || e) };
-      }
-    },
-    async performActions(actions = []) {
-      const out = [];
-      const wait = (ms) => new Promise(r => setTimeout(r, ms));
-      for (const a of (Array.isArray(actions) ? actions : [])) {
-        // do not auto-submit forms; only supported types
-        if (!['navigate','scrollBy','scrollTo','click','type'].includes(a?.type)) {
-          out.push({ ok:false, error:'UNSUPPORTED', action:a });
-          continue;
-        }
+      }},
+      async performActions(actions = []) {
+        const out = [];
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        for (const a of (Array.isArray(actions) ? actions : [])) {
+          // do not auto-submit forms; only supported types
+          if (!['navigate','scrollBy','scrollTo','click','type','pressEnter','waitFor'].includes(a?.type)) {
+            out.push({ ok:false, error:'UNSUPPORTED', action:a });
+            continue;
+          }
         // eslint-disable-next-line no-await-in-loop
         const res = await this.performAction(a);
         out.push({ ...res, action:a });
