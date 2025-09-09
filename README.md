@@ -1,12 +1,33 @@
-# React + Vite
+# Vasudev Browser
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A custom Chromium-based desktop browser built with Electron + React (Vite). It features a minimalist, futuristic UI with neon accents, a frameless window, and a rich offline homepage.
 
-Currently, two official plugins are available:
+> **Status:** Active development (Phase 1 complete scaffolding + core UX).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## Expanding the ESLint configuration
+## ✨ Key Features
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- **Minimalist UI**: A frameless window with a custom title bar and neon accents.
+- **Custom Tabs**: Tabs with favicons, titles, and a smooth neon underline to show the active tab.
+- **Rich Offline Homepage**: A unique, non-scrollable page with a "Matrix" dock, a search bar, and quick links.
+- **AI Assistant**: A Comet-like AI assistant powered by Gemini for persistent help, page grounding, and agentic actions (with permission).
+
+---
+## 🤝 Contributing
+- We welcome contributions! Please keep the following in mind:
+- Follow the Aesthetic: Maintain the minimalist, futuristic neon UI style.
+- Review Your Code: If you use AI tools, please review and understand the code before pushing. Quality and clarity are more important than speed.
+
+## ⚡ Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- npm 9+
+
+### Install & Run
+
+```bash
+npm install
+npm run dev
